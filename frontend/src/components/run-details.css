@@ -1,0 +1,328 @@
+.run-detail {
+  padding: 28px;
+  font-variant-numeric: tabular-nums lining-nums;
+}
+.run-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+.run-source {
+  min-width: 0;
+}
+.run-eyebrow {
+  color: var(--muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+}
+.run-source h3 {
+  margin: 7px 0 8px;
+  font-size: 21px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-source p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.run-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  flex-shrink: 0;
+  min-width: 100px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: #f6f7f8;
+  font-size: 11px;
+  text-transform: capitalize;
+  color: var(--muted);
+}
+.run-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.run-status-running,
+.run-status-completed {
+  background: #f0f6f2;
+  border-color: #dce9e1;
+  color: #39634e;
+}
+.run-status-pausing,
+.run-status-paused {
+  background: #faf6ee;
+  border-color: #eae1ce;
+  color: #866a32;
+}
+.run-status-failed {
+  background: #fbf2f0;
+  border-color: #ecd9d4;
+  color: #9b4e40;
+}
+.run-progress-label {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 20px;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 9px;
+  line-height: 18px;
+}
+.run-progress-label span {
+  text-transform: capitalize;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.run-progress-label strong {
+  min-width: 8ch;
+  text-align: right;
+  font-weight: 500;
+}
+.run-progress-track {
+  height: 4px;
+  background: #edf0f1;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.run-progress-track span {
+  display: block;
+  height: 100%;
+  background: #63866f;
+}
+.run-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 24px 0 28px;
+  padding: 22px 0;
+  border-block: 1px solid var(--line);
+}
+.run-summary-item {
+  min-width: 0;
+  padding: 0 22px;
+  border-left: 1px solid var(--line);
+}
+.run-summary-item:first-child {
+  border-left: 0;
+  padding-left: 0;
+}
+.run-summary-item:last-child {
+  padding-right: 0;
+}
+.run-summary-item dt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.run-summary-item svg {
+  flex-shrink: 0;
+  color: #607f86;
+}
+.run-summary-item dd {
+  margin: 13px 0 7px;
+  font-size: clamp(22px, 2vw, 29px);
+  line-height: 36px;
+  letter-spacing: -0.7px;
+  font-weight: 550;
+  white-space: nowrap;
+}
+.run-summary-item small,
+.run-metric-group small {
+  font-size: 11px;
+  letter-spacing: 0;
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 5px;
+}
+.run-summary-caption {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 16px;
+  min-height: 32px;
+}
+.run-metric-groups {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-bottom: 24px;
+}
+.run-metric-group {
+  min-width: 0;
+}
+.run-metric-group h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.run-metric-group h4 svg {
+  color: #607f86;
+}
+.run-metric-group dl {
+  margin: 0;
+}
+.run-metric-group dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 43px;
+  border-bottom: 1px solid #edf0f1;
+}
+.run-metric-group dt {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 16px;
+}
+.run-metric-group dd {
+  margin: 0;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  text-align: right;
+}
+.run-disclosure {
+  border-top: 1px solid var(--line);
+}
+.run-disclosure > summary {
+  padding: 14px 0;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  line-height: 20px;
+}
+.run-log-count {
+  display: inline-block;
+  text-align: center;
+  min-width: 4ch;
+  margin-left: 7px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #f0f3f5;
+  font-size: 10px;
+}
+.run-log-scroll {
+  height: 220px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 12px 18px;
+  background: #fafbfc;
+  font-size: 11px;
+  line-height: 1.9;
+  color: var(--muted);
+}
+.run-log-scroll ol {
+  margin: 0;
+  padding-left: 23px;
+}
+.run-log-scroll li {
+  padding: 3px 0 3px 5px;
+  overflow-wrap: anywhere;
+}
+.run-measurement-notes {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.8;
+  padding-bottom: 14px;
+}
+.run-measurement-notes p {
+  margin: 0 0 8px;
+  max-width: 100ch;
+}
+.run-measurement-notes dl {
+  margin: 14px 0 0;
+}
+.run-measurement-notes dl > div {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 2fr;
+  gap: 16px;
+  margin: 5px 0;
+}
+.run-measurement-notes dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.run-empty {
+  padding: 50px 28px;
+  text-align: center;
+  color: var(--muted);
+}
+.run-empty svg {
+  color: #607f86;
+}
+.run-empty h3 {
+  font-size: 15px;
+  font-weight: 500;
+}
+.run-empty p {
+  font-size: 12px;
+}
+@media (max-width: 1100px) {
+  .run-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 24px;
+  }
+  .run-summary-item:nth-child(3) {
+    border-left: 0;
+    padding-left: 0;
+  }
+  .run-metric-groups {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 650px) {
+  .run-detail {
+    padding: 20px 16px;
+  }
+  .run-heading {
+    gap: 10px;
+  }
+  .run-source h3 {
+    font-size: 18px;
+  }
+  .run-status {
+    min-width: 80px;
+    padding-inline: 8px;
+  }
+  .run-summary-item {
+    padding-inline: 12px;
+  }
+  .run-summary-item dt {
+    font-size: 11px;
+    gap: 5px;
+  }
+  .run-summary-item dd {
+    font-size: 22px;
+  }
+  .run-metric-groups {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+  }
+  .run-summary-caption {
+    min-height: 48px;
+  }
+  .run-measurement-notes dl > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}

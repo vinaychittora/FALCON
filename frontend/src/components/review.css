@@ -1,0 +1,345 @@
+.observation-review.modal {
+  max-width: 850px;
+  border: 1px solid #d8deda;
+  border-radius: 14px;
+}
+.observation-review .panel-heading {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e5e9e5;
+  z-index: 3;
+}
+.observation-review .panel-heading h3 {
+  line-height: 1.35;
+  font-family: inherit;
+  font-size: 20px;
+  font-weight: 600;
+}
+.observation-review .review-kicker {
+  margin: 0 0 5px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #617069;
+}
+.review-context {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 12px 24px;
+  font-size: 12px;
+  color: #52635a;
+}
+.review-context > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.review-context > button {
+  margin-left: auto;
+}
+.review-preview {
+  padding: 0 24px;
+}
+.review-preview .player {
+  border-radius: 8px;
+}
+.review-preview .player video,
+.review-preview .player img {
+  max-height: 310px;
+  min-height: 180px;
+  aspect-ratio: 16/8;
+}
+.review-preview audio {
+  width: 100%;
+}
+.review-source-note {
+  margin: 0;
+  padding: 0 24px;
+  font-size: 12px;
+  color: #6b746f;
+}
+.observation-review .review-form {
+  padding: 20px 24px 24px;
+}
+.review-original {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 18px;
+}
+.review-original > span,
+.review-original > small {
+  font-size: 12px;
+  color: #68746d;
+}
+.review-original > strong {
+  font-size: 15px;
+  font-weight: 550;
+  color: #283c32;
+}
+.review-decisions {
+  border: 0;
+  padding: 0;
+  margin: 0 0 22px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.review-decisions legend {
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  padding: 0;
+}
+.observation-review .review-form .review-decisions label {
+  margin: 0;
+  justify-content: flex-start;
+  align-items: flex-start;
+  display: flex;
+  gap: 9px;
+  border: 1px solid #e0e5e1;
+  border-radius: 7px;
+  padding: 11px;
+  cursor: pointer;
+}
+.observation-review .review-form .review-decisions label.selected {
+  background: #eff5ef;
+  border-color: #669279;
+}
+.review-decisions input {
+  width: 16px;
+  height: 16px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+  accent-color: #31664b;
+}
+.review-decisions label:has(input:disabled) {
+  opacity: 0.55;
+  cursor: default;
+}
+.review-decisions strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.review-decisions small {
+  display: block;
+  color: #657168;
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 3px;
+}
+.observation-review .review-form .species-picker > label {
+  display: block;
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.species-picker > input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid #bbc9bf;
+  border-radius: 7px;
+  background: #fff;
+  font-size: 14px;
+}
+.species-picker > small {
+  display: block;
+  margin: 7px 0;
+  color: #657168;
+  font-size: 11px;
+}
+.species-matches {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+  max-height: 245px;
+  overflow: auto;
+  border: 1px solid #dde5df;
+  border-radius: 7px;
+}
+.species-matches:empty {
+  display: none;
+}
+.species-matches li + li {
+  border-top: 1px solid #edf0ed;
+}
+.species-matches button {
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: #fff;
+  padding: 10px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  text-align: left;
+  gap: 8px;
+}
+.species-matches .keyboard-active button {
+  background: #f2f5f2;
+  box-shadow: inset 3px 0 #577665;
+}
+.species-matches [aria-selected="true"] button {
+  background: #edf5ee;
+}
+.species-matches button strong {
+  display: block;
+  font-size: 13px;
+  color: #263c30;
+  font-weight: 550;
+}
+.species-matches button em {
+  display: block;
+  font-size: 12px;
+  color: #69786e;
+  margin-top: 4px;
+}
+.species-selected-mark {
+  font-size: 10px;
+  color: #326449;
+}
+.chosen-species {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-left: 3px solid #73927e;
+  padding: 5px 12px;
+  margin: 15px 0 20px;
+}
+.chosen-species span {
+  font-size: 11px;
+  color: #657168;
+}
+.chosen-species strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.chosen-species em {
+  font-size: 12px;
+  color: #657168;
+}
+.observation-review .review-form .review-notes {
+  display: block;
+  margin: 18px 0;
+}
+.review-notes > span {
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+}
+.review-notes small {
+  font-size: 11px;
+  font-weight: 400;
+  color: #69786e;
+}
+.observation-review .review-form .review-notes textarea {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px;
+  font-size: 13px;
+  border: 1px solid #d2dcd4;
+  border-radius: 7px;
+}
+.review-save-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.review-save-row > span {
+  font-size: 11px;
+  color: #5b7161;
+}
+.observation-review .review-save-row .primary {
+  white-space: nowrap;
+  padding: 11px 18px;
+  font-size: 13px;
+}
+.observation-review .review-form .error {
+  color: #9d302a;
+  font-size: 13px;
+}
+.review-suggestions {
+  border-top: 1px solid #e3e9e3;
+  margin-top: 24px;
+  padding-top: 15px;
+  font-size: 12px;
+}
+.review-suggestions summary {
+  cursor: pointer;
+  margin-bottom: 10px;
+}
+.review-suggestions .model-evidence-heading,
+.review-suggestions .model-evidence-score,
+.review-suggestions .model-evidence-reason,
+.review-suggestions .model-evidence-caption {
+  font-size: 12px;
+}
+.history-review-count {
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: #6b776e;
+}
+.history-controls {
+  flex-wrap: wrap;
+}
+.history-controls > input {
+  flex: 1 1 220px;
+}
+.history-controls .run-selector {
+  flex: 0 1 auto;
+}
+.history-section .review-status {
+  font-size: 11px;
+}
+.history-section .review-status.correct,
+.history-section .review-status.corrected {
+  color: #31664b;
+}
+.history-section .review-status.false_positive {
+  color: #8c4d43;
+}
+.history-section .review-status.unknown {
+  color: #876628;
+}
+.taxonomy-empty {
+  padding: 20px;
+  font-size: 13px;
+  color: #657168;
+}
+.taxa .panel-heading h3 span {
+  font-size: 13px;
+  margin-left: 6px;
+  color: #657168;
+  font-weight: 400;
+}
+@media (max-width: 600px) {
+  .observation-review.modal {
+    width: calc(100% - 16px);
+    max-height: 95vh;
+  }
+  .observation-review .panel-heading,
+  .observation-review .review-form {
+    padding: 16px;
+  }
+  .review-context {
+    padding: 10px 16px;
+    gap: 8px;
+  }
+  .review-preview {
+    padding: 0 16px;
+  }
+  .review-decisions {
+    grid-template-columns: 1fr;
+  }
+  .review-save-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .review-context > button {
+    margin-left: 0;
+  }
+}

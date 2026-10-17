@@ -1,0 +1,33 @@
+import platform
+
+from fastapi import APIRouter, Request
+
+router = APIRouter(prefix="/api", tags=["system"])
+
+
+@router.get("/health")
+def health(request: Request) -> dict[str, object]:
+    return {
+        "status": "ok",
+        "version": "0.2.0",
+        "app": "falcon",
+        "frontend_ready": (request.app.state.config.frontend_dir / "index.html").is_file(),
+    }
+
+
+@router.get("/system")
+def system(request: Request) -> dict[str, object]:
+    upload_allowed = not request.scope.get("falcon.remote_authenticated", False)
+    try:
+        import torch
+
+        cuda = torch.cuda.is_available()
+        return {
+            "upload_allowed": upload_allowed,
+            "device": "cuda" if cuda else "cpu",
+            "gpu": torch.cuda.get_device_name() if cuda else None,
+            "torch": torch.__version__,
+            "python": platform.python_version(),
+        }
+    except ImportError:
+        return {"upload_allowed": upload_allowed, "device": "cpu", "gpu": None, "torch": None, "python": platform.python_version()}

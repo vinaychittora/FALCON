@@ -1,0 +1,56 @@
+.source-technical {
+  margin: 1rem 1.25rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border, #dce2dd);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--text, #24342d);
+}
+.source-technical-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.8rem;
+}
+.source-technical .source-technical-heading h3 {
+  font-family: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.4;
+  margin: 0;
+  letter-spacing: 0;
+}
+.source-technical-heading > span,
+.source-technical p {
+  font-size: 0.7rem;
+  color: var(--muted, #66736b);
+}
+.source-technical dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 0.85rem 1rem;
+  margin: 0;
+}
+.source-technical dt {
+  font-size: 0.68rem;
+  color: var(--muted, #66736b);
+  margin-bottom: 0.25rem;
+}
+.source-technical dd {
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.source-technical p {
+  margin: 0.85rem 0 0;
+}
+@media (max-width: 600px) {
+  .source-technical {
+    margin: 0.75rem;
+  }
+  .source-technical dl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

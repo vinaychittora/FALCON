@@ -1,0 +1,131 @@
+.device-access {
+  padding: 28px;
+}
+.device-access-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  gap: 36px;
+}
+.device-access-section {
+  min-width: 0;
+}
+.device-access-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  color: #496457;
+  margin-bottom: 22px;
+}
+.device-access-heading h3 {
+  margin: 0 0 6px;
+  color: #293a32;
+  font-size: 17px;
+}
+.device-access-heading p,
+.device-access-section p {
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 0 0 16px;
+}
+.device-access-heading p {
+  margin: 0;
+  color: #6e7873;
+}
+.device-access-status,
+.device-access-actions,
+.device-connectivity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+  font-size: 12px;
+}
+.device-state {
+  display: inline-flex;
+  padding: 5px 9px;
+  border-radius: 5px;
+  background: #f0f2ef;
+  color: #58645d;
+  font-size: 12px;
+}
+.device-state.active {
+  background: #e9f1ea;
+  color: #376148;
+}
+.device-admin-list,
+.device-share-address label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.device-admin-list textarea {
+  min-width: 0;
+  width: 100%;
+  resize: vertical;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 400;
+}
+.device-access-section small {
+  display: block;
+  color: #6e7873;
+  font-size: 12px;
+  line-height: 1.6;
+  margin-top: 7px;
+}
+.device-access-section input:disabled,
+.device-access-section textarea:disabled {
+  opacity: 0.65;
+}
+.device-setup a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #395e4b;
+}
+.device-share-address {
+  border-top: 1px solid #e5e9e4;
+  padding-top: 18px;
+  margin-top: 22px;
+}
+.device-share-address input {
+  width: 100%;
+  min-width: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+}
+.device-share-address button {
+  margin-top: 10px;
+}
+.device-connectivity {
+  justify-content: space-between;
+  border-top: 1px solid #e5e9e4;
+  padding-top: 16px;
+  margin-top: 22px;
+}
+.device-auto-observe {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  margin-bottom: 12px;
+}
+.device-auto-observe input {
+  flex: none;
+}
+@media (max-width: 800px) {
+  .device-access {
+    padding: 20px;
+  }
+  .device-access-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 28px;
+  }
+  .device-access-section + .device-access-section {
+    border-top: 1px solid #e5e9e4;
+    padding-top: 24px;
+  }
+}
