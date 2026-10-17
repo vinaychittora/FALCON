@@ -1,0 +1,73 @@
+.sensor-history {
+  margin-top: 2.5rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.sensor-history header,
+.sensor-history footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.sensor-history h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0;
+  font-size: 1.25rem;
+}
+.sensor-history header p,
+.sensor-history footer,
+.sensor-history small {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.sensor-history header p {
+  margin: 0.45rem 0 1rem;
+}
+.sensor-history-empty {
+  min-height: 5rem;
+  display: flex;
+  align-items: center;
+  color: var(--muted);
+}
+.sensor-history-scroll {
+  overflow: auto;
+  max-height: 28rem;
+  scrollbar-gutter: stable;
+}
+.sensor-history table {
+  width: 100%;
+  min-width: 760px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+}
+.sensor-history th {
+  text-align: left;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.sensor-history th svg {
+  vertical-align: text-bottom;
+  margin-right: 0.2rem;
+}
+.sensor-history th,
+.sensor-history td {
+  padding: 0.9rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+.sensor-history small {
+  display: block;
+  margin-top: 0.25rem;
+}
+.sensor-history footer {
+  padding-top: 0.75rem;
+}
+.sensor-history footer button {
+  margin-left: 0.65rem;
+}

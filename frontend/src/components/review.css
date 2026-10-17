@@ -1,24 +1,24 @@
 .observation-review.modal {
   max-width: 850px;
-  border: 1px solid #d8deda;
+  border: 1px solid var(--line);
   border-radius: 14px;
 }
 .observation-review .panel-heading {
   padding: 20px 24px;
-  border-bottom: 1px solid #e5e9e5;
+  border-bottom: 1px solid var(--line);
   z-index: 3;
 }
 .observation-review .panel-heading h3 {
   line-height: 1.35;
   font-family: inherit;
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
 }
 .observation-review .review-kicker {
   margin: 0 0 5px;
-  font-size: 11px;
+  font-size: 0.8125rem;
   font-weight: 500;
-  color: #617069;
+  color: var(--muted);
 }
 .review-context {
   display: flex;
@@ -26,8 +26,8 @@
   gap: 14px;
   flex-wrap: wrap;
   padding: 12px 24px;
-  font-size: 12px;
-  color: #52635a;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .review-context > span:first-child {
   overflow: hidden;
@@ -55,8 +55,8 @@
 .review-source-note {
   margin: 0;
   padding: 0 24px;
-  font-size: 12px;
-  color: #6b746f;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .observation-review .review-form {
   padding: 20px 24px 24px;
@@ -69,13 +69,13 @@
 }
 .review-original > span,
 .review-original > small {
-  font-size: 12px;
-  color: #68746d;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .review-original > strong {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 550;
-  color: #283c32;
+  color: var(--ink);
 }
 .review-decisions {
   border: 0;
@@ -86,7 +86,7 @@
   gap: 8px;
 }
 .review-decisions legend {
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 600;
   margin-bottom: 10px;
   padding: 0;
@@ -97,56 +97,56 @@
   align-items: flex-start;
   display: flex;
   gap: 9px;
-  border: 1px solid #e0e5e1;
+  border: 1px solid var(--line);
   border-radius: 7px;
   padding: 11px;
   cursor: pointer;
 }
 .observation-review .review-form .review-decisions label.selected {
-  background: #eff5ef;
-  border-color: #669279;
+  background: var(--success-surface);
+  border-color: var(--forest);
 }
 .review-decisions input {
   width: 16px;
   height: 16px;
   margin: 1px 0 0;
   flex: 0 0 auto;
-  accent-color: #31664b;
+  accent-color: var(--success);
 }
 .review-decisions label:has(input:disabled) {
   opacity: 0.55;
   cursor: default;
 }
 .review-decisions strong {
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 .review-decisions small {
   display: block;
-  color: #657168;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 0.8125rem;
   line-height: 1.5;
   margin-top: 3px;
 }
 .observation-review .review-form .species-picker > label {
   display: block;
   margin: 0 0 8px;
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 .species-picker > input {
   width: 100%;
   padding: 11px 12px;
-  border: 1px solid #bbc9bf;
+  border: 1px solid var(--line);
   border-radius: 7px;
-  background: #fff;
-  font-size: 14px;
+  background: var(--surface);
+  font-size: 0.875rem;
 }
 .species-picker > small {
   display: block;
   margin: 7px 0;
-  color: #657168;
-  font-size: 11px;
+  color: var(--muted);
+  font-size: 0.8125rem;
 }
 .species-matches {
   list-style: none;
@@ -154,20 +154,20 @@
   margin: 10px 0;
   max-height: 245px;
   overflow: auto;
-  border: 1px solid #dde5df;
+  border: 1px solid var(--line);
   border-radius: 7px;
 }
 .species-matches:empty {
   display: none;
 }
 .species-matches li + li {
-  border-top: 1px solid #edf0ed;
+  border-top: 1px solid var(--line);
 }
 .species-matches button {
   width: 100%;
   border: 0;
   border-radius: 0;
-  background: #fff;
+  background: var(--surface);
   padding: 10px 12px;
   display: flex;
   justify-content: space-between;
@@ -176,70 +176,70 @@
   gap: 8px;
 }
 .species-matches .keyboard-active button {
-  background: #f2f5f2;
-  box-shadow: inset 3px 0 #577665;
+  background: var(--surface-hover);
+  box-shadow: inset 3px 0 var(--forest);
 }
 .species-matches [aria-selected="true"] button {
-  background: #edf5ee;
+  background: var(--success-surface);
 }
 .species-matches button strong {
   display: block;
-  font-size: 13px;
-  color: #263c30;
+  font-size: 0.875rem;
+  color: var(--ink);
   font-weight: 550;
 }
 .species-matches button em {
   display: block;
-  font-size: 12px;
-  color: #69786e;
+  font-size: 0.875rem;
+  color: var(--muted);
   margin-top: 4px;
 }
 .species-selected-mark {
-  font-size: 10px;
-  color: #326449;
+  font-size: 0.75rem;
+  color: var(--success);
 }
 .chosen-species {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  border-left: 3px solid #73927e;
+  border-left: 3px solid var(--forest);
   padding: 5px 12px;
   margin: 15px 0 20px;
 }
 .chosen-species span {
-  font-size: 11px;
-  color: #657168;
+  font-size: 0.8125rem;
+  color: var(--muted);
 }
 .chosen-species strong {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 .chosen-species em {
-  font-size: 12px;
-  color: #657168;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .observation-review .review-form .review-notes {
   display: block;
   margin: 18px 0;
 }
 .review-notes > span {
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 600;
   display: flex;
   gap: 8px;
   align-items: baseline;
 }
 .review-notes small {
-  font-size: 11px;
+  font-size: 0.8125rem;
   font-weight: 400;
-  color: #69786e;
+  color: var(--muted);
 }
 .observation-review .review-form .review-notes textarea {
   width: 100%;
   margin-top: 8px;
   padding: 10px;
-  font-size: 13px;
-  border: 1px solid #d2dcd4;
+  font-size: 0.875rem;
+  border: 1px solid var(--line);
   border-radius: 7px;
 }
 .review-save-row {
@@ -249,23 +249,23 @@
   gap: 20px;
 }
 .review-save-row > span {
-  font-size: 11px;
-  color: #5b7161;
+  font-size: 0.8125rem;
+  color: var(--muted);
 }
 .observation-review .review-save-row .primary {
   white-space: nowrap;
   padding: 11px 18px;
-  font-size: 13px;
+  font-size: 0.875rem;
 }
 .observation-review .review-form .error {
-  color: #9d302a;
-  font-size: 13px;
+  color: var(--danger);
+  font-size: 0.875rem;
 }
 .review-suggestions {
-  border-top: 1px solid #e3e9e3;
+  border-top: 1px solid var(--line);
   margin-top: 24px;
   padding-top: 15px;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 .review-suggestions summary {
   cursor: pointer;
@@ -275,12 +275,12 @@
 .review-suggestions .model-evidence-score,
 .review-suggestions .model-evidence-reason,
 .review-suggestions .model-evidence-caption {
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 .history-review-count {
   margin: 7px 0 0;
-  font-size: 12px;
-  color: #6b776e;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .history-controls {
   flex-wrap: wrap;
@@ -292,27 +292,27 @@
   flex: 0 1 auto;
 }
 .history-section .review-status {
-  font-size: 11px;
+  font-size: 0.8125rem;
 }
 .history-section .review-status.correct,
 .history-section .review-status.corrected {
-  color: #31664b;
+  color: var(--success);
 }
 .history-section .review-status.false_positive {
-  color: #8c4d43;
+  color: var(--danger);
 }
 .history-section .review-status.unknown {
-  color: #876628;
+  color: var(--warning);
 }
 .taxonomy-empty {
   padding: 20px;
-  font-size: 13px;
-  color: #657168;
+  font-size: 0.875rem;
+  color: var(--muted);
 }
 .taxa .panel-heading h3 span {
-  font-size: 13px;
+  font-size: 0.875rem;
   margin-left: 6px;
-  color: #657168;
+  color: var(--muted);
   font-weight: 400;
 }
 @media (max-width: 600px) {

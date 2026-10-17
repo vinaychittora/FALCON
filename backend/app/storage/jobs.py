@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas import Job
 from app.storage.database import Database, database_for
+from app.storage.lifecycle import lifecycle_lock
 from app.taxonomy.cache import atomic_json
 
 logger = logging.getLogger(__name__)
@@ -40,8 +41,9 @@ class JobStore:
         self.directory = directory
         self.lock = threading.RLock()
         self.database = database or database_for(directory)
-        self._migrate()
-        self._recover_interrupted()
+        with lifecycle_lock(self.database.path.parent):
+            self._migrate()
+            self._recover_interrupted()
 
     def _recover_interrupted(self) -> None:
         # A second app instance can be initialized before its listen port fails.

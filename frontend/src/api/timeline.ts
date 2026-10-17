@@ -1,5 +1,9 @@
 import type { Detection, VisualEvent, AudioEvent } from "../types";
-import { correctedNames, type TaxonNameIndex } from "./names";
+import {
+  correctedNames,
+  scientificSubtitle,
+  type TaxonNameIndex,
+} from "./names";
 export function currentEvents(events: Detection[], time: number) {
   const visual = events.filter(
     (e): e is VisualEvent =>
@@ -46,10 +50,7 @@ export const displayScientificName = (
       : event.modality === "visual"
         ? event.classification.scientific_name
         : event.scientific_name;
-  return scientific?.trim().toLocaleLowerCase("en") ===
-    displayLabel(event, taxa).trim().toLocaleLowerCase("en")
-    ? null
-    : scientific;
+  return scientificSubtitle(displayLabel(event, taxa), scientific);
 };
 export function matchesObservation(
   event: Detection,

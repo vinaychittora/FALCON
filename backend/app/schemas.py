@@ -163,7 +163,27 @@ class EnvironmentReading(BaseModel):
     pressure_hpa: float | None = None
 
 
-class VisualEvent(BaseModel):
+class EvidenceSummary(BaseModel):
+    evidence_id: str
+    media_kind: Literal["video", "audio"]
+    status: Literal["pending", "ready", "partial", "failed"]
+    duration_ms: int = 0
+    captured_at: str
+    audio_present: bool = False
+    mime_type: str
+    message: str | None = None
+    actual_start_ms: int | None = None
+    actual_end_ms: int | None = None
+
+
+class ObservationContext(BaseModel):
+    captured_at: str | None = None
+    time_basis: Literal["server_receive_time", "source_relative_time_only", "unknown"] = "unknown"
+    source_kind: Literal["live", "file", "unknown"] = "unknown"
+    evidence_summaries: list[EvidenceSummary] = Field(default_factory=list)
+
+
+class VisualEvent(ObservationContext):
     schema_version: str = "0.1"
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     job_id: str
@@ -181,7 +201,7 @@ class VisualEvent(BaseModel):
     review: Review = Field(default_factory=Review)
 
 
-class AudioEvent(BaseModel):
+class AudioEvent(ObservationContext):
     schema_version: str = "0.1"
     event_id: str = Field(default_factory=lambda: str(uuid4()))
     job_id: str

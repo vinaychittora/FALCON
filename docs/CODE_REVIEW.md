@@ -21,10 +21,11 @@ The service worker stores only a generic offline help page. It does not cache AP
 
 ## Frontend verification
 
-- 100 automated frontend tests passed.
+- The field-workflow verification below supersedes the initial frontend test count.
 - ESLint passed, including service-worker globals.
 - TypeScript and the production Vite build passed.
-- The active browser session, analyses, camera state, and stored observations were not changed for this review.
+- Browser acceptance covers saved video/audio playback. The backend update restores
+  the camera through its saved profile; existing observations and reviews are preserved.
 
 The tests use media-event fixtures and rendered components. They do not replace a browser/platform acceptance check for installation, camera connectivity, codec support, or model inference on new hardware.
 
@@ -49,3 +50,69 @@ The backend/controller suite and publication/script tests passed, including corr
 The original development history contains private validation reports and personal filesystem paths. It is preserved locally and excluded from the public release. The release exporter uses an exact reviewed source allowlist, content checks, approved static icon hashes and a SHA256 receipt. It rejects runtime files, media, credentials, databases, model weights, symlinks and unapproved binaries. Automated scans are heuristic and were supplemented by source/history review. They are not a guarantee against every possible secret format.
 
 The documented release commit uses the developer's hosting-provider noreply identity. The same clean-source process applies to a private repository and prepares for possible later publication. Source code is licensed separately from pretrained model weights. The training download/train/export utilities remain explicitly labeled planning scaffolds; they do not silently download datasets or claim to train/export a model.
+
+## Field workflow review
+
+- Replaced the mixed file/live archive with a field-only query and export scope.
+  Known uploaded jobs take precedence when classifying legacy records. Missing
+  capture-time anchors remain unknown; record-write time is never substituted.
+- Persisted live session anchors and per-event receive timestamps. Retained media
+  and observation links survive backend restarts independently of review edits.
+- Pinned encoded camera packets before slow classification; exact-window output
+  preserves source frame timing. Buffer/pin/queue limits, reconnect generations,
+  disk reserve checks, atomic files, checksums and explicit partial/failure states
+  prevent misleading or unbounded recordings. Partial/failed clips are not reused
+  for later events outside their actual coverage.
+- Added five-second acoustic WAV retention, with sample-clock timing and no claim
+  that a visible organism produced a call. Video clips are explicitly silent.
+- Added periodic sensor history independent of inference, authenticated local
+  ingestion, replay checks and event-time lookup. Invalid/stale/ambiguous readings
+  remain distinct from valid measurements. No sensor values are simulated.
+- Added explicit ownership and expiry for future Media tests. Cross-process locks
+  protect ownership, resume and cleanup. Cleanup waits for owned workers, rewrites
+  persistence mirrors safely and deletes only owned new files. Legacy/field data,
+  borrowed uploads and modified files are preserved. Interrupted uploads and
+  power-loss cleanup retry are covered by regression tests.
+- Field export streams records into CSV/JSONL, includes review audit and independent
+  sensor history, validates retained media and writes a SHA-256 manifest. It is a
+  documented FALCON archive, not a falsely claimed validated Camtrap DP package.
+
+Verification includes the full backend/script/frontend suites, Ruff, mypy, ESLint
+and the production build. Private footage verified full-rate five-second video
+retention across a classification delay longer than the normal rolling buffer;
+the browser decoded it successfully. After the controlled backend restart, the
+saved camera reconnected, generated new acoustic detections, and retained playable
+five-second WAV clips. The live export's file sizes, hashes and audio durations
+were verified. All pre-update observation/job IDs and the existing review audit
+were checked against a private SQLite backup and retained.
+
+This verifies application behavior, not species identification accuracy. Physical
+Pi camera/HAT/sensor drivers, sustained field power/temperature/network operation
+and ARM64/Jetson packaging still require acceptance on the selected hardware.
+
+## Live operations and privacy review
+
+System now opens on the active camera/audio inputs, live inference, evidence capture,
+current processing-computer resources and sensor freshness. Historical uploaded-run
+diagnostics are confined to Media tests. Processing FPS uses the live session clock;
+slow host probes cannot inflate or reduce it through browser response timing. Polling
+does not overlap, aborts when the panel unmounts, and marks failed readings stale.
+Host telemetry uses a shared five-second cache and bounded local GPU query, with no
+CUDA context creation. WSL scope and unavailable measurements are explicit.
+
+Optional model-library analytics, implicit saved-token use, update checks and online
+connectivity probes are disabled before imports. A fresh interpreter test exercises
+the installed dependencies with DNS/socket access blocked, outside pytest's automatic
+analytics suppression. Explicit model downloads remain functional.
+
+Validation covered 291 backend tests, the script/release tests, frontend regressions,
+Ruff, mypy, ESLint and the production build. Browser checks confirmed live camera/audio
+reception and resource readings. The active session closed without pending clips;
+observation and evidence records survived the controlled restart. The saved camera
+reconnected and resumed visual inference, audio analysis and rolling-buffer capture.
+
+Runtime checks found only loopback FALCON listeners in Windows and WSL, remote access
+disabled, and no public backend connections at the sampled times. Host/origin attacks
+and attempts to read private files through the development server were rejected.
+This is an application audit, not continuous network surveillance or an audit of the
+camera vendor's cloud traffic, router or unrelated PC applications.

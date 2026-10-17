@@ -1,3 +1,4 @@
+import importlib
 import threading
 import time
 from contextlib import contextmanager
@@ -266,6 +267,9 @@ def test_live_cancel_keeps_heavy_job_lease_until_model_load_finishes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # The lease assertion measures worker coordination, not a cold dependency
+    # import. LiveService imports this before starting capture/model loading.
+    importlib.import_module("torchvision.io")
     worker, competitor = runner(tmp_path), runner(tmp_path)
     live = LiveService(worker)
     entered, release = threading.Event(), threading.Event()

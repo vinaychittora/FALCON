@@ -1,5 +1,6 @@
 import type { Video } from "../types";
 import { ApiError } from "./client";
+import { testSessionHeaders } from "./testSessions";
 
 function uploadFailure(response: Response) {
   if (response.status === 413)
@@ -10,12 +11,19 @@ function uploadFailure(response: Response) {
 }
 
 /** Stream the browser's file through FormData; do not read it into JS memory. */
-export async function uploadMedia(file: File): Promise<Video> {
+export async function uploadMedia(
+  file: File,
+  testSessionId?: string,
+): Promise<Video> {
   const body = new FormData();
   body.append("file", file);
   let response: Response;
   try {
-    response = await fetch("/api/videos/upload", { method: "POST", body });
+    response = await fetch("/api/videos/upload", {
+      method: "POST",
+      body,
+      headers: testSessionHeaders(testSessionId),
+    });
   } catch {
     throw new Error(
       "The upload connection failed. Check that FALCON is reachable and refresh the source library before retrying.",

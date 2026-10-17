@@ -13,23 +13,23 @@
   display: flex;
   align-items: flex-start;
   gap: 12px;
-  color: #496457;
+  color: var(--forest);
   margin-bottom: 22px;
 }
 .device-access-heading h3 {
   margin: 0 0 6px;
-  color: #293a32;
-  font-size: 17px;
+  color: var(--ink);
+  font-size: 1.0625rem;
 }
 .device-access-heading p,
 .device-access-section p {
-  font-size: 13px;
+  font-size: 0.875rem;
   line-height: 1.6;
   margin: 0 0 16px;
 }
 .device-access-heading p {
   margin: 0;
-  color: #6e7873;
+  color: var(--muted);
 }
 .device-access-status,
 .device-access-actions,
@@ -39,26 +39,26 @@
   align-items: center;
   gap: 12px;
   margin: 16px 0;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 .device-state {
   display: inline-flex;
   padding: 5px 9px;
   border-radius: 5px;
-  background: #f0f2ef;
-  color: #58645d;
-  font-size: 12px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.875rem;
 }
 .device-state.active {
-  background: #e9f1ea;
-  color: #376148;
+  background: var(--success-surface);
+  color: var(--success);
 }
 .device-admin-list,
 .device-share-address label {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 600;
 }
 .device-admin-list textarea {
@@ -71,8 +71,8 @@
 }
 .device-access-section small {
   display: block;
-  color: #6e7873;
-  font-size: 12px;
+  color: var(--muted);
+  font-size: 0.875rem;
   line-height: 1.6;
   margin-top: 7px;
 }
@@ -84,10 +84,10 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #395e4b;
+  color: var(--forest);
 }
 .device-share-address {
-  border-top: 1px solid #e5e9e4;
+  border-top: 1px solid var(--line);
   padding-top: 18px;
   margin-top: 22px;
 }
@@ -95,14 +95,14 @@
   width: 100%;
   min-width: 0;
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: 0.875rem;
 }
 .device-share-address button {
   margin-top: 10px;
 }
 .device-connectivity {
   justify-content: space-between;
-  border-top: 1px solid #e5e9e4;
+  border-top: 1px solid var(--line);
   padding-top: 16px;
   margin-top: 22px;
 }
@@ -110,7 +110,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  font-size: 14px;
+  font-size: 0.875rem;
   margin-bottom: 12px;
 }
 .device-auto-observe input {
@@ -125,7 +125,7 @@
     gap: 28px;
   }
   .device-access-section + .device-access-section {
-    border-top: 1px solid #e5e9e4;
+    border-top: 1px solid var(--line);
     padding-top: 24px;
   }
 }

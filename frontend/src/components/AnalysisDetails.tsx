@@ -1,36 +1,33 @@
-import { useState } from "react";
-import type { Config, Detection, Job, Models } from "../types";
+import type { Config, Models } from "../types";
 import Settings from "./Settings";
-import RunDetails from "./RunDetails";
 import DeviceAccess from "./DeviceAccess";
+import LiveSystem from "./LiveSystem";
+
+export type SystemTab = "live" | "settings" | "models" | "device";
 
 export default function AnalysisDetails({
   config,
   models,
-  job,
-  events,
-  sourceName,
+  tab,
+  onTab,
   busy,
   onConfig,
   onSave,
 }: {
   config: Config | null;
   models: Models | null;
-  job: Job | null;
-  events: Detection[];
-  sourceName?: string;
+  tab: SystemTab;
+  onTab: (tab: SystemTab) => void;
   busy: boolean;
   onConfig: (value: Config) => void;
   onSave: () => void;
 }) {
-  const [tab, setTab] = useState("settings");
   const activeTab = tab;
-  const tabs = [
+  const tabs: [SystemTab, string][] = [
+    ["live", "Live status"],
     ["settings", "Configuration"],
     ["models", "Model status"],
     ["device", "Device access"],
-    ["progress", "Selected run"],
-    ["raw", "Raw records"],
   ];
   return (
     <div className="system-workspace">
@@ -41,12 +38,13 @@ export default function AnalysisDetails({
             role="tab"
             aria-selected={activeTab === key}
             className={activeTab === key ? "active" : ""}
-            onClick={() => setTab(key)}
+            onClick={() => onTab(key)}
           >
             {label}
           </button>
         ))}
       </div>
+      {activeTab === "live" && <LiveSystem />}
       {activeTab === "settings" && config && (
         <>
           <Settings
@@ -56,9 +54,6 @@ export default function AnalysisDetails({
             busy={busy}
           />
         </>
-      )}
-      {activeTab === "progress" && (
-        <RunDetails job={job} sourceName={sourceName} />
       )}
       {activeTab === "device" && <DeviceAccess />}
       {activeTab === "models" && (
@@ -84,15 +79,6 @@ export default function AnalysisDetails({
             <pre className="json-view">{JSON.stringify(models, null, 2)}</pre>
           </details>
         </div>
-      )}
-      {activeTab === "raw" && (
-        <>
-          <p className="raw-caption">
-            {sourceName ?? "No media selected"} · Original predictions and saved
-            review fields.
-          </p>
-          <pre className="json-view">{JSON.stringify(events, null, 2)}</pre>
-        </>
       )}
     </div>
   );

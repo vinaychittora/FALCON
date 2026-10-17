@@ -56,6 +56,10 @@ export interface EnvironmentReading {
   pressure_hpa: number | null;
 }
 interface BaseEvent {
+  captured_at?: string | null;
+  time_basis?: "server_receive_time" | "source_relative_time_only" | "unknown";
+  source_kind?: "live" | "file" | "unknown";
+  evidence_summaries?: EvidenceSummary[];
   environment: EnvironmentReading;
   event_id: string;
   source_id: string;
@@ -63,6 +67,18 @@ interface BaseEvent {
   job_id: string;
   models: Record<string, string>;
   review: Review;
+}
+export interface EvidenceSummary {
+  evidence_id: string;
+  media_kind: "video" | "audio";
+  status: "pending" | "ready" | "partial" | "failed";
+  duration_ms: number;
+  captured_at: string;
+  audio_present: boolean;
+  mime_type: string;
+  message: string | null;
+  actual_start_ms: number | null;
+  actual_end_ms: number | null;
 }
 export interface VisualEvent extends BaseEvent {
   modality: "visual";

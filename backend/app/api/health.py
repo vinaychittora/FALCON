@@ -1,8 +1,21 @@
 import platform
+import threading
 
 from fastapi import APIRouter, Request
 
+from app.services.system_metrics import SystemMetrics, SystemMetricsSampler
+
 router = APIRouter(prefix="/api", tags=["system"])
+_metrics_creation_lock = threading.Lock()
+
+
+@router.get("/system/metrics", response_model=SystemMetrics)
+def system_metrics(request: Request) -> SystemMetrics:
+    with _metrics_creation_lock:
+        if not hasattr(request.app.state, "system_metrics"):
+            request.app.state.system_metrics = SystemMetricsSampler(request.app.state.config.data_dir)
+        sampler: SystemMetricsSampler = request.app.state.system_metrics
+    return sampler.snapshot()
 
 
 @router.get("/health")

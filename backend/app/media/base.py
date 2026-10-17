@@ -13,6 +13,8 @@ class Frame:
     rgb: NDArray[np.uint8]
     captured_at: datetime | None = None
     next_sample_s: float | None = None
+    recording_generation: str | None = None
+    recording_timestamp_s: float | None = None
 
 
 class MediaSource(Protocol):

@@ -8,6 +8,7 @@ import ObservationRail from "./ObservationRail";
 import SourceTechnical from "./SourceTechnical";
 import { contentRect } from "./VideoPlayer";
 import { useTaxonNames } from "./TaxonNames";
+import "./evidence.css";
 
 export interface CameraProfile {
   saved: boolean;
@@ -45,6 +46,17 @@ export function validateCameraUrl(value: string): string | null {
   } catch {
     return "Enter a complete RTSP camera address.";
   }
+}
+
+export function evidenceRecordingIssue(metrics: LiveState["metrics"]): string {
+  return (
+    [
+      metrics.evidence_error,
+      metrics.evidence_capture_fault,
+      metrics.evidence_recording_fault,
+    ].find((value): value is string => typeof value === "string" && !!value) ||
+    ""
+  );
 }
 
 function LivePreview({ state, show }: { state: LiveState; show: boolean }) {
@@ -498,6 +510,31 @@ export default function LiveCamera({
             </button>
           </div>
           <SourceTechnical live={state} />
+          {state &&
+          (state.metrics.evidence_policy ||
+            evidenceRecordingIssue(state.metrics)) ? (
+            <div
+              className="live-evidence-summary"
+              aria-label="Encounter recording status"
+            >
+              <Icon name="library" size={17} />
+              <strong>5-second encounter clips</strong>
+              <span>Short rolling buffer · no continuous archive</span>
+              {evidenceRecordingIssue(state.metrics) ? (
+                <span className="error" role="alert">
+                  {evidenceRecordingIssue(state.metrics)}
+                </span>
+              ) : (
+                <span>
+                  {Number(state.metrics.evidence_ready_clips || 0) +
+                    Number(state.metrics.audio_clips_saved || 0)}{" "}
+                  saved · {Number(state.metrics.evidence_pending_clips || 0)}{" "}
+                  pending
+                </span>
+              )}
+              <span>Review and export from Observations</span>
+            </div>
+          ) : null}
         </section>
         <ObservationRail
           visual={state?.visual ?? []}

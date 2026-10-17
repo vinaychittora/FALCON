@@ -1,5 +1,6 @@
 import { consensusLabel, speciesModelName } from "../api/models";
 import type { VisualEvent } from "../types";
+import { scientificSubtitle } from "../api/names";
 
 export default function ModelEvidence({
   classification,
@@ -34,7 +35,10 @@ export default function ModelEvidence({
             <div className="alternative" key={candidate.taxon_id}>
               <span>
                 {candidate.common_name || candidate.scientific_name}
-                <small>{candidate.scientific_name}</small>
+                {scientificSubtitle(
+                  candidate.common_name || candidate.scientific_name,
+                  candidate.scientific_name,
+                ) && <small>{candidate.scientific_name}</small>}
               </span>
               <code>{candidate.score.toFixed(3)}</code>
             </div>

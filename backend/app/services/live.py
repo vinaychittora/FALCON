@@ -24,13 +24,17 @@ from app.media.rtsp_source import AudioChunk, RTSPSource
 from app.schemas import AnalysisSettings, AudioEvent, Review, Video, VisualEvent
 from app.schemas_live import LiveStart, LiveState
 from app.services.analyzer import Analyzer
+from app.services.encounter_evidence import EncounterEvidence
 from app.services.model_registry import package_version
+from app.storage.evidence import EvidenceStore
 from app.taxonomy.inaturalist import TaxaCache
 
 
 class LiveService:
-    def __init__(self, analyzer: Analyzer):
+    def __init__(self, analyzer: Analyzer, evidence_store: EvidenceStore | None = None):
         self.analyzer = analyzer
+        self.evidence_store = evidence_store
+        self._evidence: EncounterEvidence | None = None
         self._mutex = threading.RLock()
         self._state = LiveState()
         self._cancel = threading.Event()
@@ -61,6 +65,7 @@ class LiveService:
                 self._started = time.monotonic()
                 self._cancel = threading.Event()
                 self._preview = None
+                self._evidence = None
                 self._last_frame_at = 0
                 self._fresh_ms = min(4000, max(1500, round(2000 / request.config.sample_fps)))
                 self._audio.clear()
@@ -87,7 +92,8 @@ class LiveService:
                     messages=[
                         "Preview runs independently of inference; slow inference skips older frames.",
                         "Live audio is analyzed in 9-second CPU windows. Recent calls appear after processing.",
-                        "Raw video is not recorded. Temporary audio windows are deleted after analysis.",
+                        "Five-second encounter evidence is retained; continuous footage is not archived.",
+                        "Video clips are silent. Acoustic detections retain separate WAV clips; clocks are not synchronized.",
                     ],
                 )
                 self._worker = threading.Thread(
@@ -141,6 +147,8 @@ class LiveService:
                 and abs(result.preview_timestamp_ms - event.timestamp_ms) <= self._fresh_ms
             ]
             result.audio = [event for event in self._audio if event.end_ms >= now - 60000]
+            if self._evidence:
+                result.metrics.update(self._evidence.metrics())
             if self._source:
                 result.metrics["decoded_frames"] = self._source.decoded_frames
                 result.metrics["decoded_audio_frames"] = self._source.decoded_audio_frames
@@ -225,6 +233,22 @@ class LiveService:
             source_id = session_id.replace("-", "")[:24]
             config = request.config.model_copy(update={"max_seconds": None})
             taxa = self.analyzer.taxa.read()
+            if self.evidence_store and self._state.started_at:
+                try:
+                    self.evidence_store.register_session(
+                        session_id, source_id, request.name, self._state.started_at,
+                        {
+                            **config.model_dump(mode="json"), "evidence_mode": "encounter_clips",
+                            "evidence_seconds": 5, "sensor_id": self.analyzer.settings.sensor_id,
+                        },
+                    )
+                    self._evidence = EncounterEvidence(
+                        self.evidence_store, session_id, source_id, self._state.started_at,
+                    )
+                except Exception:
+                    self._message("Evidence recording is unavailable. Observations will still be saved; check local storage.")
+                    with self._mutex:
+                        self._state.metrics["evidence_error"] = "Evidence recorder could not start."
             # torchvision.io configures PyAV logging at import. Import it before
             # the source establishes its credential-safe native logging policy.
             importlib.import_module("torchvision.io")
@@ -237,6 +261,7 @@ class LiveService:
                 self._status,
                 self._audio_status,
                 config.audio_enabled,
+                recorder=self._evidence.recorder if self._evidence else None,
             )
             capture = threading.Thread(target=self._source.run, daemon=True, name="falcon-rtsp")
             capture.start()
@@ -306,7 +331,15 @@ class LiveService:
                 )
 
             def emit(event: VisualEvent) -> None:
+                event.source_kind = "live"
+                event.time_basis = "server_receive_time"
+                event.captured_at = (
+                    datetime.fromisoformat(self._state.started_at)
+                    + timedelta(milliseconds=event.timestamp_ms)
+                ).isoformat() if self._state.started_at else None
                 self.analyzer.events.append(event)
+                if self._evidence:
+                    self._evidence.visual(event)
                 with self._mutex:
                     if (
                         self._state.visual
@@ -343,6 +376,7 @@ class LiveService:
                 progress,
                 self._cancel,
                 self.analyzer.sensors,
+                frame_context=self._evidence.frame_context if self._evidence else None,
             )
             with self._mutex:
                 self._state.metrics.update(metrics)
@@ -359,6 +393,11 @@ class LiveService:
                 if worker:
                     # Keep the lease until all capture/analysis subprocesses have stopped.
                     worker.join()
+            if self._evidence:
+                try:
+                    self._evidence.close()
+                except Exception:
+                    self._message("Evidence recording did not close cleanly. Check saved clip statuses.")
             with self._mutex:
                 self._preview = None
                 self._state.visual = []
@@ -384,6 +423,18 @@ class LiveService:
                 if self._state.status != "failed":
                     self._state.status = "stopped"
                 self._source = None
+            if self.evidence_store and self._state.session_id and self._state.started_at:
+                try:
+                    self.evidence_store.finish_session(
+                        self._state.session_id,
+                        datetime.fromisoformat(self._state.started_at) + timedelta(
+                            milliseconds=self._state.session_timestamp_ms
+                        ),
+                        "failed" if self._state.status == "failed" else "stopped",
+                        {**self._state.metrics, **(self._evidence.metrics() if self._evidence else {})},
+                    )
+                except Exception:
+                    self._message("Session closure metadata could not be saved.")
             if self._lease:
                 self._lease.close()
                 self._lease = None
@@ -440,11 +491,16 @@ class LiveService:
                         else None
                     )
                     event.environment = self.analyzer.sensors.snapshot(received_at)
+                    event.source_kind = "live"
+                    event.time_basis = "server_receive_time"
+                    event.captured_at = received_at.isoformat() if received_at else None
                     event.models["source_clock"] = "session receive time"
                     event.models["audio_timing"] = chunk.timing_note
                     self.analyzer.events.append(event)
                     with self._mutex:
                         self._audio.append(event)
+                if self._evidence:
+                    self._evidence.audio(chunk, events)
                 with self._mutex:
                     self._state.metrics.update(metrics)
                     self._state.metrics["audio_chunks_analyzed"] = (

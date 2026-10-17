@@ -6,7 +6,8 @@ Local React/TypeScript UI → same-origin `/api` proxy → FastAPI on loopback.
 Uploaded originals are served using HTTP byte ranges. File playback remains the master
 clock: the canvas and current-events panels query timestamped records, including after
 seeks. Live cameras use a separate session receive clock and preview. No annotated video,
-evidence clip, raw camera recording or persistent crop is produced.
+continuous raw camera recording or persistent crop is produced. Live encounter evidence
+is retained separately as short MP4/WAV clips; see the evidence section below.
 
 File sources decode with PyAV using presentation timestamps; the RTSP source implements
 the same frame protocol using capture on a separate thread. Detector, biological classifier
@@ -17,7 +18,7 @@ preprocessing, the complete crop is resized proportionally to at most 512 pixels
 longest edge and centered on a square gray canvas. This preserves subjects near the crop
 edges instead of losing them to a center crop; it does not restore missing image detail.
 An IoU tracker aggregates a limited number of sharp crops without asserting biological
-identity. Evidence expires after five seconds,
+identity. Track classification evidence expires after five seconds,
 and a scene-change heuristic resets tracks across large visual changes. Similar-looking
 edits can still evade that heuristic. Conservative score/margin/detail rules retain
 unknowns. BioCLIP cosine similarity is not a probability.
@@ -197,7 +198,50 @@ and ranks indexed species/source names before pagination. The correction picker 
 ranked common/scientific names and explicit selection, with original media preview.
 Standalone sound uploads go directly to BirdNET without initializing visual models.
 The visible technical panel shows source metadata and measured live video transport
-rates, with missing values distinguished from zero. Raw live media is still not retained.
+rates, with missing values distinguished from zero. Raw continuous media is not retained; selected encounter intervals are retained as MP4/WAV evidence.
 Source information follows the file-analysis controls and timeline. The Environment
 panel is limited to the live camera/device view; uploaded videos, images and sounds do
 not show disconnected-device sensor placeholders.
+
+System opens on live input, inference, evidence and sensor health. `/api/system/metrics`
+samples CPU, RAM, the data volume and server process with psutil, plus available GPU
+telemetry through a two-second-bounded `nvidia-smi` query. A shared five-second cache
+serializes probes without starting a CUDA context. The response excludes paths, host
+identifiers and raw command errors, and uses the normal API access controls/no-store
+policy. WSL CPU/RAM are explicitly distinguished from Windows host totals. Missing
+measurements remain null. File-run diagnostics and raw test records stay in Media tests.
+
+Application package initialization opts out of optional inference-library telemetry,
+implicit saved Hugging Face token use, update checks, Ultralytics online probes and
+automatic package installation before importing those dependencies. Explicit model
+downloads and requested taxonomy refreshes remain available; see `SECURITY.md`.
+
+
+## Live encounter evidence
+
+The RTSP video subscription copies encoded H.264/H.265 packets into a 15-second target
+rolling buffer capped at 64 MiB. Sampling pins the relevant GOP and the requested
+two-second pre-roll / three-second post-roll before inference. Pending classification
+does not keep unrelated future footage. A bounded background worker decodes the selected
+interval and encodes H.264 MP4 at the original presentation timing, without model overlays.
+Reconnects and timestamp discontinuities create separate capture generations. Storage
+checks preserve a 256 MiB free-space reserve; existing saved evidence is never evicted.
+
+Observations inside one five-second capture window can share media. These window IDs
+are not biological individual counts; an ongoing encounter may span multiple clips.
+Partial capture, unavailable keyframes, encoding errors and exhausted resources remain
+explicit records. Evidence failure must not prevent observation persistence or model
+lease cleanup. Acoustic events retain five-second mono PCM WAV excerpts from the exact
+analyzed window, with no padding. Video clips have no audio track; the independent
+receive clocks do not establish audiovisual synchronization.
+
+Evidence/session/link tables in SQLite are separate from observation review payloads.
+Asynchronous completion cannot overwrite a review. Interrupted pending captures are
+recovered only while holding the cross-process inference lease. Source names, saved
+analysis settings, server receive-clock anchors and numeric coverage metrics are durable.
+Sensor readings remain disconnected until a real provider is installed.
+
+The evidence API serves confined local media paths and portable CSV/JSONL/media archives.
+See [export format](DATA_EXPORT.md), [field deployment](FIELD_DEPLOYMENT.md) and the
+[appliance recovery policy](APPLIANCE.md). Physical Pi/sensor integration and full
+Camtrap DP validation remain separate implementation work.

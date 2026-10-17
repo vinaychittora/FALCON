@@ -2,7 +2,11 @@
 
 ## Sources
 
-Uploads preserve the original, hash it, and reuse it across analyses. The application
+The interface opens on **Monitor**, for the live device. **Observations** contains field
+device detections and saved encounter media; uploaded test files never appear in that archive.
+Use **Media tests** for uploaded photos, videos and audio recordings.
+
+Uploads preserve the original during the test session, hash it, and reuse it across analyses. The application
 does not transcode originals. HEVC browser playback may fail even when backend decoding
 works. Local uploads have no default byte ceiling; free space must accommodate multipart
 spooling and the retained original. Copying files into `data/samples/` and rescanning avoids
@@ -15,7 +19,75 @@ only for the same address and username. Forgetting a profile does not delete obs
 
 Camera audio uses a separate subscription and nine-second BirdNET windows. Some cameras
 require both tracks on that connection. Preview frames can be skipped when processing is
-slower than acquisition. Processing FPS differs from camera FPS. No live video is recorded.
+slower than acquisition. Processing FPS differs from camera FPS. New live sessions retain five-second encounter video clips and separate acoustic WAV clips.
+Continuous footage is not archived. Video clips are silent; acoustic evidence is not synchronized
+to video. Review and export saved clips from Observations; see [data export](DATA_EXPORT.md).
+
+Field observations show a calendar date, time to the second and local timezone. The timestamp
+is based on the inference server's receive clock, not a verified camera exposure clock. Hover
+over a timestamp for UTC. Older records without a durable clock anchor show **Capture time
+unavailable**. **Play video** and **Play audio** open retained evidence before the review form;
+missing older media is explicitly marked unavailable.
+
+## Display and keyboard navigation
+
+The top tabs select the workspace directly. **Display**, in the top-right corner,
+offers Dark, Light or Follow device themes, three text sizes, and a higher-contrast
+option. Dark is the initial theme. Preferences are saved only in this browser;
+they do not change inference settings or send information to an external service.
+If browser storage is blocked, the controls still work for the current page.
+
+Use Left/Right arrows, Home or End while a main tab has focus to select a section.
+The first keyboard link skips directly to the workspace. Escape closes the Display
+menu and returns focus to its button. Navigating or changing appearance does not
+stop a live observation.
+
+## Live system health
+
+**System** opens on **Live status**, independent of the last uploaded test. It displays
+the live camera's received frame rate, resolution, codec and measured bitrate; audio
+format and processing status; inference delays; saved evidence; and the most recent
+environmental reading. Missing sensors remain **Not connected**, with no synthetic values.
+Sensor freshness is based on the recorded reading time, not the dashboard refresh.
+
+Current CPU, RAM, disk space, GPU memory/utilization/temperature and server uptime come
+from the processing computer. The host sampler is shared across viewers and refreshed
+at most every five seconds. Its first CPU sample establishes a baseline; unavailable
+measurements show a dash. Under WSL, CPU and RAM describe the Linux VM, not Windows
+totals. GPU values cover the shared GPU, including other applications. Server-process
+memory is distinct from overall memory and excludes separate worker processes.
+
+Camera FPS measures received frames, not the number analyzed. Inference sampling and
+audio windows run independently. Delays and dropped windows indicate whether analysis
+is keeping up; saved detection counts do not count unique animals. Network or sampling
+failures leave the last values visibly stale rather than presenting them as current.
+
+The dashboard only reads local API endpoints; it does not contact an external monitoring
+service. Live monitoring continues when navigating away. File-run statistics and raw
+test records remain under **Media tests → Selected test · analysis diagnostics**.
+
+## Temporary media tests
+
+New browser uploads and new analysis runs belong to the current temporary test session.
+**End test session** stops that session's analysis, waits for its worker to release files,
+and removes its temporary uploads and results. It does not stop live observation or delete
+previously saved files, runs or field observations. Re-uploading an existing file borrows that
+file; ending the test does not remove the retained original. A new temporary analysis of an
+existing file is still removed when its test session ends.
+
+Pause and resume work within the test session. Refreshing the page restores the same session
+using tab-local browser storage. Keep the session open to retain paused temporary work; ending
+it removes that work. Resuming an older saved run preserves its existing ownership and retention.
+The End action is disabled while an upload, analysis start or control request is in flight.
+
+Closing a tab does not immediately delete data, so a reload cannot accidentally destroy a test.
+The browser renews its lease once per minute while open. Abandoned sessions become eligible for
+cleanup after 24 hours without a heartbeat; cleanup waits for any owned worker to stop. If the
+service is off, cleanup runs after it starts again. Use **End test session** for immediate cleanup.
+
+The optional `X-Falcon-Test-Session` API header associates uploads and new analyses with a session.
+API callers without the header retain the earlier persistent behavior. It is an ownership
+identifier, not an authentication mechanism. Existing saved test data is not retroactively deleted.
 
 ## Analysis and review
 
@@ -47,7 +119,8 @@ SQLite database without WAL state can lose data; use SQLite's backup API for onl
 
 Restore with the service stopped and retain owner-only permissions. Keep originals with
 the database for historical playback. Models can be downloaded again; retaining the cache
-saves bandwidth. No automatic retention or deletion policy is enabled.
+saves bandwidth. Field observations and previously saved media have no automatic deletion
+policy. Temporary Media tests are the exception: their session cleanup removes owned files and results.
 
 ## Troubleshooting
 

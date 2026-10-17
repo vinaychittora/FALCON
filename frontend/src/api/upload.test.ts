@@ -5,6 +5,20 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("media upload", () => {
   const file = () => new File(["sample"], "sample.mp4", { type: "video/mp4" });
+  it("associates a new upload with its browser test session without overriding multipart boundaries", async () => {
+    const fetch = vi
+      .fn()
+      .mockResolvedValue(
+        Response.json({ source_id: "temporary", filename: "sample.mp4" }),
+      );
+    vi.stubGlobal("fetch", fetch);
+    await uploadMedia(file(), "test-session");
+    const request = fetch.mock.calls[0][1];
+    expect(request.headers).toEqual({
+      "X-Falcon-Test-Session": "test-session",
+    });
+    expect(request.body).toBeInstanceOf(FormData);
+  });
 
   it("passes a large file through FormData without a client byte ceiling or whole-file read", async () => {
     const source = file();

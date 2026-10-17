@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     site_lon: float | None = None
     save_reviewed_crops: bool = False
     debug_audio: bool = False
+    sensor_ingest_token: SecretStr | None = None
+    sensor_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$")
+    sensor_stale_after_seconds: float = Field(default=120, gt=0, le=86400)
     upload_limit_bytes: int | None = Field(default=None, gt=0)
     device: Literal["auto", "cuda", "cpu"] = "auto"
 

@@ -9,6 +9,7 @@ import { groupName } from "../api/taxa";
 import { consensusLabel, speciesModelName } from "../api/models";
 import ModelEvidence from "./ModelEvidence";
 import { useTaxonNames } from "./TaxonNames";
+import { scientificSubtitle } from "../api/names";
 
 export function VisualCards({
   events,
@@ -100,7 +101,10 @@ export function VisualCards({
                     <div className="alternative" key={t.taxon_id}>
                       <span>
                         {t.common_name || t.scientific_name}
-                        <small>{t.scientific_name}</small>
+                        {scientificSubtitle(
+                          t.common_name || t.scientific_name,
+                          t.scientific_name,
+                        ) && <small>{t.scientific_name}</small>}
                       </span>
                       <code>{t.score.toFixed(3)}</code>
                     </div>

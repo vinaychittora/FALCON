@@ -2,6 +2,12 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./style.css";
+import {
+  applyDisplayPreferences,
+  readDisplayPreferences,
+} from "./api/displayPreferences";
+
+applyDisplayPreferences(readDisplayPreferences());
 
 if (import.meta.env.PROD && "serviceWorker" in navigator) {
   const register = () => {

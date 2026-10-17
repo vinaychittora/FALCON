@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { scientificSubtitle } from "../api/names";
 import { api } from "../api/client";
+import { captureTime } from "../api/observations";
 import { normalizeSearch, rankTaxa } from "../api/search";
 import {
   displayLabel,
@@ -10,6 +12,7 @@ import {
 import type { Detection, Review, Video } from "../types";
 import type { Taxon } from "../pages/Taxa";
 import ImagePlayer from "./ImagePlayer";
+import EvidencePlayer from "./EvidencePlayer";
 import ModelEvidence from "./ModelEvidence";
 import VideoPlayer from "./VideoPlayer";
 import "./review.css";
@@ -91,6 +94,7 @@ export default function Inspector({
   onClose,
   onSeek,
   onSaved,
+  playEvidence = false,
 }: {
   event: Detection;
   taxa: Taxon[];
@@ -98,6 +102,7 @@ export default function Inspector({
   onClose: () => void;
   onSeek?: (ms: number) => void;
   onSaved: (e: Detection) => void;
+  playEvidence?: boolean;
 }) {
   const taxonNames = useTaxonNames();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -138,6 +143,8 @@ export default function Inspector({
         event.review.corrected_scientific_name
       : null);
   const sourceMatches = source?.source_id === event.source_id;
+  const captured = captureTime(event.captured_at);
+  const isField = event.source_kind === "live" || !sourceMatches;
   const seek = useMemo(() => ({ ms: eventTime(event), nonce: 0 }), [event]);
   const previewBoxes = (ms: number) =>
     event.modality === "visual" &&
@@ -197,7 +204,20 @@ export default function Inspector({
         <span title={event.source_filename}>{event.source_filename}</span>
         <span>
           {event.modality === "audio" ? "Acoustic" : "Visual"} ·{" "}
-          {formatTime(eventTime(event))}
+          {isField ? (
+            captured ? (
+              <time
+                dateTime={captured.utc}
+                title={captured.utc + " · server receive time"}
+              >
+                {captured.date} · {captured.time}
+              </time>
+            ) : (
+              "Capture time unavailable"
+            )
+          ) : (
+            formatTime(eventTime(event)) + " · media position"
+          )}
         </span>
         {onSeek && (
           <button
@@ -211,7 +231,7 @@ export default function Inspector({
           </button>
         )}
       </div>
-      {sourceMatches && source ? (
+      {sourceMatches && source && !isField ? (
         <div
           className="review-preview"
           aria-label="Original source at observation time"
@@ -238,9 +258,12 @@ export default function Inspector({
           )}
         </div>
       ) : (
-        <p className="review-source-note">
-          Source media is not available for this record.
-        </p>
+        <EvidencePlayer
+          eventId={event.event_id}
+          initialEvidence={event.evidence_summaries}
+          autoPlay={playEvidence}
+          legacy={isField && !captured}
+        />
       )}
       <div className="review-form">
         <div className="review-original">
@@ -248,8 +271,8 @@ export default function Inspector({
           <strong>{predictionLabel(event)}</strong>
           <small>
             {event.modality === "visual"
-              ? `Species similarity ${event.classification.score?.toFixed(3) ?? "—"} · not a probability`
-              : `BirdNET confidence ${event.confidence.toFixed(3)}`}
+              ? `Species similarity ${event.classification.score?.toFixed(2) ?? "—"} · not a probability`
+              : `BirdNET confidence ${event.confidence.toFixed(2)}`}
           </small>
         </div>
         {error && (
@@ -360,7 +383,10 @@ export default function Inspector({
                       <strong>
                         {taxon.common_name || taxon.scientific_name}
                       </strong>
-                      <em>{taxon.scientific_name}</em>
+                      {scientificSubtitle(
+                        taxon.common_name || taxon.scientific_name,
+                        taxon.scientific_name,
+                      ) && <em>{taxon.scientific_name}</em>}
                     </span>
                     {taxonId === taxon.taxon_id && (
                       <span className="species-selected-mark">Selected</span>
@@ -377,9 +403,11 @@ export default function Inspector({
             <div className="chosen-species" aria-live="polite">
               <span>Selected species</span>
               <strong>{selectedName || "No species selected"}</strong>
-              {selectedTaxon?.common_name && (
-                <em>{selectedTaxon.scientific_name}</em>
-              )}
+              {selectedTaxon &&
+                scientificSubtitle(
+                  selectedName || "",
+                  selectedTaxon.scientific_name,
+                ) && <em>{selectedTaxon.scientific_name}</em>}
             </div>
           </div>
         )}

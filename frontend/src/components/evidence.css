@@ -1,0 +1,208 @@
+.saved-evidence {
+  margin: 1rem 0;
+}
+.saved-evidence figure {
+  margin: 0 0 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.saved-evidence figcaption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.85rem;
+}
+.saved-evidence figcaption span,
+.saved-evidence figcaption a,
+.evidence-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.saved-evidence video {
+  display: block;
+  width: 100%;
+  max-height: 48vh;
+  background: var(--media-surface);
+}
+.saved-evidence audio {
+  display: block;
+  width: calc(100% - 1.8rem);
+  margin: 0.3rem 0.9rem 0.7rem;
+}
+.saved-evidence small {
+  display: block;
+  padding: 0.5rem 0.9rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.saved-evidence p {
+  margin: 0.5rem 0.9rem;
+}
+.evidence-note {
+  color: var(--warning);
+  font-size: 0.82rem;
+}
+.evidence-export {
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.live-evidence-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.9rem;
+  padding: 0.8rem 1.1rem;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+.live-evidence-summary strong {
+  color: var(--forest);
+  font-weight: 500;
+}
+.live-evidence-summary .error {
+  margin: 0;
+}
+.field-observations .archive-table {
+  min-height: 220px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface);
+}
+.field-observations table {
+  width: 100%;
+}
+.field-observations th {
+  padding-top: 17px;
+  padding-bottom: 17px;
+  background: var(--surface-muted);
+}
+.field-observations td {
+  padding-top: 18px;
+  padding-bottom: 18px;
+  vertical-align: middle;
+}
+.field-capture-time {
+  min-width: 180px;
+  font-size: 0.875rem;
+  font-variant-numeric: tabular-nums;
+}
+.field-capture-time small,
+.field-media-state,
+.field-device-name {
+  display: block;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+.field-device-name {
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.field-media-kind,
+.field-play-button,
+.field-clock-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.field-media-kind {
+  color: var(--forest);
+  font-size: 0.875rem;
+}
+.field-media-kind.audio {
+  color: var(--blue);
+}
+.field-media-state.available {
+  color: var(--success);
+}
+.field-play-button {
+  white-space: nowrap;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--forest);
+  padding: 8px 12px;
+  font-size: 0.875rem;
+}
+.field-play-button:hover {
+  background: var(--surface-hover);
+}
+.field-record-action {
+  text-align: right;
+  min-width: 125px;
+}
+.field-empty {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 48px 20px;
+  color: var(--muted);
+  text-align: center;
+}
+.field-empty p {
+  margin: 0;
+  color: var(--ink);
+}
+.field-empty span {
+  font-size: 0.875rem;
+}
+.observation-review .saved-evidence {
+  margin: 8px 24px 16px;
+}
+.test-session-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin: 0 0 20px;
+  padding: 15px 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--info-surface);
+}
+.test-session-bar strong,
+.test-session-bar span,
+.test-session-bar small {
+  display: block;
+}
+.test-session-bar strong {
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+.test-session-bar span {
+  margin-top: 4px;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.test-session-bar small {
+  margin-top: 4px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.test-session-bar button {
+  flex-shrink: 0;
+  font-size: 0.875rem;
+}
+@media (max-width: 43.75rem) {
+  .test-session-bar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .field-observations .archive-summary {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .observation-review .saved-evidence {
+    margin: 8px 16px;
+  }
+}

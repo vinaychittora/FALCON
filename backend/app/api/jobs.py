@@ -1,7 +1,9 @@
 import asyncio
+from contextlib import nullcontext
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket, WebSocketDisconnect
 
+from app.api.test_sessions import session_header
 from app.schemas import AnalysisSettings, CurrentDetections, Event, Job
 from app.security import local_browser_request
 from app.services.review_names import resolve_review_names
@@ -21,10 +23,24 @@ def described(job: Job, request: Request | WebSocket) -> Job:
 
 @router.post("/videos/{source_id}/analyze", response_model=Job, status_code=202)
 def analyze(source_id: str, body: AnalysisSettings, request: Request) -> Job:
+    identity = session_header(request)
+    sessions = getattr(request.app.state, "test_sessions", None)
+    if identity and sessions is None:
+        raise HTTPException(503, "Temporary media sessions are unavailable")
+    if identity:
+        assert sessions is not None
+        try:
+            sessions.require_active(identity)
+        except (KeyError, ValueError):
+            raise HTTPException(410, "Temporary media session ended or expired") from None
     request.app.state.appliance.suspend(wait=True)
     try:
-        path, video = request.app.state.library.get(source_id)
-        return request.app.state.analyzer.start(path, video, body)
+        with sessions.operation(identity) if sessions else nullcontext():
+            path, video = request.app.state.library.get(source_id)
+            if identity:
+                assert sessions is not None
+                return sessions.start_analysis(identity, path, video, body)  # type: ignore[no-any-return]
+            return request.app.state.analyzer.start(path, video, body)
     except KeyError as exc:
         raise HTTPException(404, "Video not found") from exc
     except ValueError as exc:
@@ -64,12 +80,19 @@ def pause_job(job_id: str, request: Request) -> Job:
 
 @router.post("/jobs/{job_id}/resume", response_model=Job, status_code=202)
 def resume_job(job_id: str, request: Request) -> Job:
+    identity = session_header(request)
+    sessions = getattr(request.app.state, "test_sessions", None)
+    if identity and sessions is None:
+        raise HTTPException(503, "Temporary media sessions are unavailable")
     if appliance := getattr(request.app.state, "appliance", None):
         appliance.suspend(wait=True)
     try:
-        job = request.app.state.jobs.get(job_id)
-        path, video = request.app.state.library.get(job.source_id)
-        return request.app.state.analyzer.resume(job_id, path, video)
+        with sessions.operation(identity) if sessions else nullcontext():
+            if sessions:
+                sessions.authorize_resume(job_id, identity)
+            job = request.app.state.jobs.get(job_id)
+            path, video = request.app.state.library.get(job.source_id)
+            return request.app.state.analyzer.resume(job_id, path, video)
     except KeyError as exc:
         raise HTTPException(404, "Job or original source not found") from exc
     except ValueError as exc:

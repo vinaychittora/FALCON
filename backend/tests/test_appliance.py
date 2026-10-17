@@ -95,7 +95,7 @@ def test_startup_uses_saved_credentials_and_saved_analysis_configuration(tmp_pat
     restored = ApplianceService(service.settings, cameras, camera)
     restored.startup()
     wait_for(restored, "observing")
-    joined(restored)
+    assert restored._worker and restored._worker.is_alive()
     assert len(camera.requests) == 1
     assert camera.requests[0].password.get_secret_value() == "fixture-secret"
     assert camera.requests[0].config == settings
@@ -104,6 +104,7 @@ def test_startup_uses_saved_credentials_and_saved_analysis_configuration(tmp_pat
     assert "fixture-secret" not in public and "fixture-user" not in public and "rtsp://" not in public
     # Turning startup off does not stop an already established live session.
     restored.configure(AppliancePreferences(auto_observe=False))
+    joined(restored)
     assert not camera.stopped
 
 
@@ -186,16 +187,23 @@ def test_appliance_api_does_not_start_camera_when_enabled_and_stop_suspends_boot
         assert app.state.appliance._cancel.is_set()
 
 
-def test_status_reports_established_camera_failure_without_auto_restart(tmp_path: Path) -> None:
+def test_established_camera_failure_recovers_and_keeps_supervision(tmp_path: Path) -> None:
     service, cameras, camera = setup(tmp_path)
     save(cameras)
     service.configure(AppliancePreferences(auto_observe=True))
     service.startup()
     wait_for(service, "observing")
-    joined(service)
     camera.current.status = "failed"
-    assert service.status().state == "failed"
-    assert len(camera.requests) == 1
+    deadline = time.monotonic() + 3
+    while len(camera.requests) < 2 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    wait_for(service, "observing")
+    assert len(camera.requests) == 2
+    assert camera.stopped == ["session-1"]
+    assert service._worker and service._worker.is_alive()
+    service.shutdown()
+    joined(service)
+    assert camera.stopped == ["session-1", "session-2"]
 
 
 def test_camera_can_arrive_after_initial_timeout_without_restart(tmp_path: Path) -> None:
@@ -211,8 +219,9 @@ def test_camera_can_arrive_after_initial_timeout_without_restart(tmp_path: Path)
     camera.current.status = "live"
     camera.current.metrics["inference_status"] = "loading models"
     wait_for(service, "observing")
-    joined(service)
     assert len(camera.requests) == 1 and not camera.stopped
+    service.shutdown()
+    joined(service)
 
 
 def test_manual_analysis_waits_for_pending_auto_camera_cleanup(tmp_path: Path) -> None:
@@ -269,5 +278,152 @@ def test_startup_honors_camera_audio_preference_over_global_setting(
     service.configure(AppliancePreferences(auto_observe=True))
     service.startup()
     wait_for(service, "observing")
-    joined(service)
     assert camera.requests[0].config.audio_enabled == audio_enabled
+    service.shutdown()
+    joined(service)
+
+
+@pytest.mark.parametrize("initially_live", [True, False])
+def test_authentication_failure_does_not_retry(tmp_path: Path, initially_live: bool) -> None:
+    service, cameras, camera = setup(tmp_path, Camera("live" if initially_live else "connecting"))
+    save(cameras)
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing" if initially_live else "waiting")
+    camera.current.error = "Camera authentication failed. Enter its local RTSP username and password."
+    camera.current.status = "failed"
+    wait_for(service, "failed")
+    joined(service)
+    assert len(camera.requests) == 1
+    assert "authentication failed" in service.status().message
+
+
+@pytest.mark.parametrize("action", ["manual_stop", "disable", "manual_analysis"])
+def test_post_connection_recovery_is_cancelled_by_user_priority(tmp_path: Path, action: str) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.retry_delay = 30
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing")
+    camera.current.status = "failed"
+    wait_for(service, "waiting")
+    if action == "disable":
+        service.configure(AppliancePreferences(auto_observe=False))
+    else:
+        service.suspend(wait=action == "manual_analysis")
+    joined(service)
+    assert len(camera.requests) == 1
+    assert service.status().state == ("disabled" if action == "disable" else "suspended")
+
+
+def test_manual_session_takeover_is_never_stopped_or_restarted(tmp_path: Path) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing")
+    camera.current = LiveState(status="live", session_id="manual-session")
+    wait_for(service, "suspended")
+    joined(service)
+    assert len(camera.requests) == 1 and not camera.stopped
+
+
+def test_reconnecting_camera_is_not_restarted_and_disable_preserves_it(tmp_path: Path) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing")
+    camera.current.status = "reconnecting"
+    wait_for(service, "waiting")
+    assert len(camera.requests) == 1 and not camera.stopped
+    service.configure(AppliancePreferences(auto_observe=False))
+    joined(service)
+    assert not camera.stopped
+
+
+def test_brief_live_connections_keep_backoff_and_recover_beyond_startup_attempt_limit(
+    tmp_path: Path,
+) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.attempts = 1
+    service.retry_delay = 0.01
+    service.retry_max_delay = 0.04
+    delays: list[float] = []
+    original = service._retry_seconds
+
+    def retry_seconds(failures: int) -> float:
+        delay = original(failures)
+        delays.append(delay)
+        return delay
+
+    service._retry_seconds = retry_seconds
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    for iteration in range(4):
+        wait_for(service, "observing")
+        camera.current.status = "failed"
+        deadline = time.monotonic() + 3
+        while len(camera.requests) < iteration + 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert len(camera.requests) == iteration + 2
+    assert delays == [0.01, 0.02, 0.04, 0.04]
+    service.shutdown()
+    joined(service)
+
+
+def test_retry_delay_is_bounded_and_never_zero(tmp_path: Path) -> None:
+    service, _, _ = setup(tmp_path)
+    service.retry_delay = 5
+    assert [service._retry_seconds(count) for count in (1, 2, 3, 100_000)] == [5, 10, 20, 300]
+    service.retry_delay = 0
+    service.retry_max_delay = 0
+    assert service._retry_seconds(1) > 0
+
+
+def test_sustained_live_session_resets_recovery_delay(tmp_path: Path) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.stable_seconds = 0.1
+    delays: list[float] = []
+    original = service._retry_seconds
+
+    def retry_seconds(failures: int) -> float:
+        delay = original(failures)
+        delays.append(delay)
+        return delay
+
+    service._retry_seconds = retry_seconds
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    for count in range(2):
+        wait_for(service, "observing")
+        if count:
+            # Allow the supervisor to observe a healthy interval before failure.
+            time.sleep(0.4)
+        camera.current.status = "failed"
+        deadline = time.monotonic() + 3
+        while len(camera.requests) < count + 2 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert len(camera.requests) == count + 2
+    assert delays == [0.01, 0.01]
+    service.shutdown()
+    joined(service)
+
+
+def test_manual_camera_started_during_retry_delay_takes_priority(tmp_path: Path) -> None:
+    service, cameras, camera = setup(tmp_path)
+    save(cameras)
+    service.retry_delay = 0.1
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing")
+    camera.current.status = "failed"
+    wait_for(service, "waiting")
+    camera.current = LiveState(status="live", session_id="manual-session")
+    wait_for(service, "suspended")
+    joined(service)
+    assert len(camera.requests) == 1
+    assert camera.stopped == ["session-1"]

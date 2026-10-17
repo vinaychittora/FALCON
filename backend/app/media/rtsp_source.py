@@ -13,6 +13,7 @@ import numpy as np
 
 from app.media.audio_clock import AudioReceiveClock
 from app.media.base import Frame
+from app.media.evidence_recorder import EvidenceRecorder
 
 
 @dataclass(frozen=True)
@@ -46,12 +47,16 @@ class RTSPSource:
         audio_status: Callable[[str], None],
         audio_enabled: bool = True,
         open_container: Callable[..., Any] = av.open,
+        recorder: EvidenceRecorder | None = None,
     ):
         self._url = url
         self.cancel, self.started = cancel, started
         self.preview, self.audio = preview, audio
         self.status, self.audio_status = status, audio_status
         self.audio_enabled, self.open_container = audio_enabled, open_container
+        self.recorder = recorder
+        self._recording_failed = False
+        self._recording_error = ""
         self.condition = threading.Condition()
         self.latest: Frame | None = None
         self.sequence = 0
@@ -97,7 +102,38 @@ class RTSPSource:
                 else 0
             )
         result["video_rate_window_seconds"] = 5
+        if self._recording_error:
+            result["evidence_capture_fault"] = self._recording_error
         return result
+
+    def _start_recording(self, stream: Any) -> str | None:
+        self._recording_failed = False
+        self._recording_error = ""
+        if self.recorder:
+            try:
+                return self.recorder.start_generation(stream)
+            except Exception:
+                self._recording_failed = True
+                self._recording_error = "Evidence recording could not start; camera analysis continues."
+        return None
+
+    def _record_packet(self, packet: Any) -> str | None:
+        if self.recorder and not self._recording_failed:
+            try:
+                self.recorder.append_packet(packet)
+                return self.recorder.current_generation
+            except Exception:
+                self._recording_failed = True
+                self._recording_error = "Evidence capture failed; camera analysis continues."
+                self._end_recording()
+        return None
+
+    def _end_recording(self) -> None:
+        if self.recorder:
+            try:
+                self.recorder.end_generation()
+            except Exception:
+                self._recording_error = "Evidence recording could not finalize its capture interval."
 
     def _stream_metadata(self, stream: Any, kind: str) -> None:
         context = getattr(stream, "codec_context", None)
@@ -197,6 +233,7 @@ class RTSPSource:
                             return
                         video = container.streams.video[0]
                         self._stream_metadata(video, "video")
+                        generation = self._start_recording(video)
                         video.thread_count = 4
                         video.thread_type = "AUTO"
                         next_preview = 0.0
@@ -204,6 +241,7 @@ class RTSPSource:
                             if self.cancel.is_set():
                                 return
                             self._record_video_packet(getattr(packet, "size", 0))
+                            generation = self._record_packet(packet)
                             for decoded in packet.decode():
                                 if not isinstance(decoded, av.VideoFrame):
                                     continue
@@ -217,6 +255,12 @@ class RTSPSource:
                                     self.elapsed_ms(),
                                     np.asarray(decoded.to_ndarray(format="rgb24"), dtype=np.uint8),
                                     datetime.now(UTC),
+                                    recording_generation=generation,
+                                    recording_timestamp_s=(
+                                        float(decoded.pts * decoded.time_base)
+                                        if decoded.pts is not None and decoded.time_base is not None
+                                        else None
+                                    ),
                                 )
                                 with self.condition:
                                     self.latest = frame
@@ -246,6 +290,8 @@ class RTSPSource:
                         "Camera connection interrupted. Retrying; check the URL, credentials and network.",
                     )
                     self.cancel.wait(min(10, 2 ** min(failures - 1, 3)))
+                finally:
+                    self._end_recording()
         finally:
             self.cancel.set()
             if audio_worker:

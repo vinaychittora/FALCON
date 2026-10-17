@@ -1,5 +1,6 @@
 import type { Job } from "../types";
 import { api } from "./client";
+import { testSessionHeaders } from "./testSessions";
 
 export const isActiveAnalysis = (job: Job | null | undefined) =>
   !!job && ["queued", "running", "pausing"].includes(job.status);
@@ -32,6 +33,7 @@ export async function controlAnalysis(
   action: "pause" | "resume",
   job: Job,
   sourceId: string,
+  testSessionId?: string | null,
 ): Promise<Job> {
   if (job.source_id !== sourceId)
     throw new Error("Select this analysis source before continuing.");
@@ -41,5 +43,8 @@ export async function controlAnalysis(
     throw new Error("This analysis is not running.");
   const operation =
     action === "pause" && !supportsAnalysisControl(job) ? "cancel" : action;
-  return api<Job>(`/jobs/${job.job_id}/${operation}`, { method: "POST" });
+  return api<Job>(`/jobs/${job.job_id}/${operation}`, {
+    method: "POST",
+    ...(testSessionId ? { headers: testSessionHeaders(testSessionId) } : {}),
+  });
 }

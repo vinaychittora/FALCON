@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import TypeAdapter
@@ -21,6 +21,8 @@ from pydantic import TypeAdapter
 from app.schemas import Event, Job, Review
 from app.storage.database import Database, database_for
 from app.storage.jobs import AnalysisCheckpoint, now
+from app.storage.lifecycle import lifecycle_lock
+from app.storage.observation_context import capture_time_sql, enrich_events, origin_sql, tables
 
 adapter: TypeAdapter[Event] = TypeAdapter(Event)  # type: ignore[arg-type]
 logger = logging.getLogger(__name__)
@@ -119,7 +121,8 @@ class EventStore:
         self.directory = directory
         self.lock = threading.RLock()
         self.database = database or database_for(directory)
-        self._migrate()
+        with lifecycle_lock(self.database.path.parent):
+            self._migrate()
 
     def path(self, source_id: str) -> Path:
         if len(source_id) != 24 or any(c not in "0123456789abcdef" for c in source_id):
@@ -299,6 +302,7 @@ class EventStore:
         review_status: str | None = None,
         modality: str | None = None,
         name_aliases: dict[str, float] | None = None,
+        scope: Literal["live", "all"] = "all",
     ) -> dict[str, Any]:
         limit, offset = min(500, max(1, limit)), max(0, offset)
         conditions: list[str] = []
@@ -312,10 +316,13 @@ class EventStore:
             if value:
                 conditions.append(f"e.{column}=?")
                 parameters.append(value)
-        where = " WHERE " + " AND ".join(conditions) if conditions else ""
-        base = "SELECT e.payload, e.recorded_at, e.rowid FROM observations e" + where
         search = normalize((q or "")[:200])
         with self.database.connection() as connection:
+            available = tables(connection)
+            if scope == "live":
+                conditions.append(f"({origin_sql(available)})='live'")
+            where = " WHERE " + " AND ".join(conditions) if conditions else ""
+            base = "SELECT e.payload, e.recorded_at, e.rowid FROM observations e" + where
             if search:
                 values = connection.execute(
                     "SELECT DISTINCT value FROM observation_terms"
@@ -350,24 +357,35 @@ class EventStore:
                 f"SELECT * FROM ({base}) ORDER BY {order}recorded_at DESC, rowid DESC LIMIT ? OFFSET ?",
                 [*parameters, limit, offset],
             ).fetchall()
-        return {"events": [adapter.validate_json(row["payload"]) for row in rows], "total": total}
+            events = enrich_events(connection, [adapter.validate_json(row["payload"]) for row in rows], available=available)
+        return {"events": events, "total": total}
 
-    def sources(self) -> list[dict[str, Any]]:
+    def sources(self, scope: Literal["live", "all"] = "all") -> list[dict[str, Any]]:
         with self.database.connection() as connection:
+            available = tables(connection)
+            where = " WHERE source_kind='live'" if scope == "live" else ""
             rows = connection.execute(
+                "WITH contextual AS (SELECT e.*, " + origin_sql(available) + " AS source_kind, "
+                + capture_time_sql(available) + " AS capture_timestamp FROM observations e) "
                 "SELECT source_id, MAX(source_filename) AS source_filename, COUNT(*) AS count,"
-                " MAX(recorded_at) AS latest_at, GROUP_CONCAT(DISTINCT modality) AS modalities,"
-                " GROUP_CONCAT(DISTINCT job_id) AS job_ids FROM observations"
-                " GROUP BY source_id ORDER BY latest_at DESC"
+                " MAX(capture_timestamp) AS latest_at, GROUP_CONCAT(DISTINCT modality) AS modalities,"
+                " GROUP_CONCAT(DISTINCT job_id) AS job_ids, MAX(source_kind) AS source_kind "
+                "FROM contextual" + where + " GROUP BY source_id ORDER BY MAX(recorded_at) DESC"
             ).fetchall()
-        return [
-            {
-                **dict(row),
-                "modalities": row["modalities"].split(","),
-                "job_ids": row["job_ids"].split(","),
-            }
-            for row in rows
-        ]
+            sessions = connection.execute(
+                "SELECT payload FROM evidence_sessions ORDER BY started_at"
+            ).fetchall() if "evidence_sessions" in available else []
+        session_by_source = {session["source_id"]: session for row in sessions if (session := json.loads(row["payload"]))}
+        result = []
+        for row in rows:
+            session = session_by_source.get(row["source_id"], {})
+            result.append({
+                **dict(row), "source_filename": session.get("name", row["source_filename"]),
+                "modalities": row["modalities"].split(","), "job_ids": row["job_ids"].split(","),
+                "session_id": session.get("session_id"), "started_at": session.get("started_at"),
+                "ended_at": session.get("ended_at"),
+            })
+        return result
 
     def review(self, event_id: str, review: Review) -> Event:
         with self.database.connection() as connection:
@@ -376,7 +394,7 @@ class EventStore:
             ).fetchone()
         if source is None:
             raise KeyError(event_id)
-        with self.lock, self._source_lock(source["source_id"]):
+        with lifecycle_lock(self.database.path.parent), self.lock, self._source_lock(source["source_id"]):
             with self.database.connection() as connection:
                 # Acquire the SQLite writer lease before reading the previous review.
                 # This keeps the audit chain correct across app/store instances.

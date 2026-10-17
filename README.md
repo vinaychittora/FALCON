@@ -3,9 +3,12 @@
 **Field Acoustic, Lens & Climate Observation Node**
 Developed by **Vinay Chittora**.
 
-FALCON analyzes wildlife photographs, video recordings, audio files and live RTSP cameras
-on your own computer. It combines generic animal detection, regional species candidates,
-independent bird-call detection and human review. Media, observations and camera credentials stay local.
+FALCON monitors a location through live camera, audio and environmental measurements.
+A Raspberry Pi acquires camera, microphone and sensor data; a separate GPU computer
+runs inference and the web interface over a wired or wireless local connection.
+It combines generic animal detection, regional species candidates, independent
+bird-call detection and human review. Media, observations and camera credentials stay local.
+Uploaded photographs, recordings and audio are a separate development/testing workspace.
 
 This is an experimental scientific observation tool. Model suggestions require review;
 similarity scores are not calibrated probabilities and detections are not animal counts.
@@ -44,30 +47,40 @@ useful for larger classifiers. Keep the folder on a Linux filesystem under WSL.
 
 ## Features
 
-- Original photo/video/audio analysis, with uploaded originals retained locally.
+- Separate temporary Media tests for photo/video/audio analysis.
 - Timestamped boxes, species candidates and independent acoustic detections.
 - RTSP camera monitoring with encrypted saved credentials.
+- Five-second encounter video clips and separate acoustic WAV clips, with bounded rolling buffers.
+- Reviewable saved evidence and portable CSV/JSONL/media archives with SHA-256 checksums.
 - Pause/resume across restarts, preserving completed visual work and reviews.
 - Human correction/rejection without replacing original model evidence.
 - Spelling-tolerant search of common and scientific names.
 - Source codec, frame rate, bitrate, timing and memory diagnostics.
-- SQLite observation history, review audit and source-record export.
+- Live camera/audio health, sensor freshness and current CPU/GPU/RAM/storage measurements.
+- Live-only field history with occurrence date/time, evidence playback and review audit.
+- Independent periodic sensor history and event-time readings with age/quality status.
 - Optional boot service and automatic observation of the saved camera.
 - Private Tailscale admin access, with an explicit login allowlist and share address.
 
-Environmental sensors are not integrated. A disconnected placeholder appears only for
-live devices; no sensor readings are simulated.
+Sensor history and authenticated local ingestion are implemented. Physical Pi sensor
+drivers and capture provisioning still need hardware acceptance. No sensor readings
+are simulated; uploaded tests never inherit current environmental readings.
+See the [node and sensor contract](docs/SENSORS.md).
 
 ## Use
 
-1. Open **Sources** and add media or select **Live camera**.
-2. Analyze a file, or enter the camera RTSP URL and separate local credentials, save and start.
-3. Inspect the timeline and review suggestions before treating them as biological records.
+1. Open **Monitor**, enter the camera RTSP URL and separate local credentials, save and start.
+2. Open **Observations** for live records, video/audio evidence, corrections and sensor history.
+3. Use **Media tests** for uploaded development samples; these are excluded from field records.
 4. **Pause analysis** saves progress and frees the engine. **Resume** keeps the run's saved
    settings; **Analyze again** starts a new run with the current settings.
-5. Configure models, thresholds and ROI in **System**.
+5. **System → Live status** shows the current camera/audio inputs, inference delays,
+   saved-evidence counts, sensor freshness and processing computer health. Configure
+   models, thresholds and ROI in **System → Configuration**.
+6. Open a live record in **Observations** to play its saved clip. **Export evidence** downloads
+   field records and retained media for the selected camera session or all live sessions.
 
-Uploads remain in `data/samples/`. Local uploads have no application byte-size limit;
+Uploads use `data/samples/`. Local uploads have no application byte-size limit;
 available disk space still applies. Upload directly on the device, or copy files there
 and rescan. Remote uploads are disabled. Supported formats include MP4, MOV, MKV, AVI, WebM, MTS, JPEG, PNG, WebP, WAV, MP3,
 FLAC, M4A, OGG and AAC. Images are limited to 40 MP. Animated images and external-reference
@@ -76,6 +89,9 @@ playlists are rejected. Browser playback depends on codec support.
 Resume preserves completed visual frames and reviews. An incomplete audio stage restarts.
 Source or taxonomy changes can invalidate a checkpoint. One inference job runs at a time.
 Recorded runtime/peak GPU memory update on pause or completion; other metrics update during work.
+File-run diagnostics are under **Media tests → Selected test · analysis diagnostics**.
+Live host measurements are separate from those recorded peaks. Under WSL, CPU and RAM
+describe the Linux environment; GPU readings describe the shared physical GPU.
 Read [operation, backup and troubleshooting](docs/OPERATIONS.md).
 
 ## Models and taxonomy
@@ -109,6 +125,7 @@ See [remote access and SSH](docs/REMOTE_ACCESS.md) and [appliance startup](docs/
 | --- | --- |
 | `data/falcon.sqlite3` | Observations, jobs, reviews, media metadata, camera profile |
 | `data/samples/` | Original media |
+| `data/evidence/` | Retained MP4/WAV encounter clips; never include in source releases |
 | `data/settings.json` | Saved settings and optional approximate site location |
 | `data/private/camera.key` | Key for saved camera-password encryption |
 | `models/` | Model and embedding caches |
@@ -116,7 +133,9 @@ See [remote access and SSH](docs/REMOTE_ACCESS.md) and [appliance startup](docs/
 
 Camera passwords are never returned by the API. Encryption protects a database copy,
 but someone with both the database and key can decrypt it. The runtime directory is
-private to the operating-system user. No automatic retention/deletion policy is enabled.
+private to the operating-system user. Field observations and evidence are retained;
+temporary Media tests have a separate session lifecycle. Existing historical test
+data is preserved. See the [operations guide](docs/OPERATIONS.md).
 
 Do not publish media, EXIF metadata, observations, keys, backups, environment files or
 local validation reports. A `.gitignore` cannot remove private content from old commits.
@@ -150,9 +169,16 @@ The [requirements checklist](docs/REQUIREMENTS.md) records implemented features 
 
 This is not yet a validated unattended field appliance. Jetson packaging, sustained field
 operation, sensor integration and species-accuracy evaluation remain separate work.
-Corrections do not automatically retrain a model. Live video is not recorded, so historical
-camera observations have no retrospective video preview. Annotated video and persistent
-crop export are not implemented.
+Corrections do not automatically retrain a model. New live sessions retain encounter clips;
+older sessions cannot recover discarded footage. Video clips are silent; acoustic detections
+retain separate WAV clips. This does not establish audiovisual synchronization. Annotated
+video and persistent crop export are not implemented.
+
+See [field deployment](docs/FIELD_DEPLOYMENT.md) for an outdoor Pi camera/microphone/sensor
+node with either an indoor server or a standalone wired inference unit. The Pi capture
+installer and physical sensor drivers remain to be built and tested on the selected hardware.
+The [data export guide](docs/DATA_EXPORT.md) documents portable archives and the metadata
+needed before a validated Camtrap DP export can be added.
 
 Application code: [Apache 2.0](LICENSE). Developer: **Vinay Chittora**.
 Third-party libraries, models and taxonomy retain their own attribution and licenses.

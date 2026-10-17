@@ -5,7 +5,7 @@ import { AudioCards } from "../components/DetectionCards";
 import ObservationHistory from "../components/ObservationHistory";
 import Inspector from "../components/Inspector";
 import { TaxonNamesContext } from "../components/TaxonNames";
-import { indexTaxonNames } from "./names";
+import { indexTaxonNames, scientificSubtitle } from "./names";
 import {
   displayLabel,
   displayScientificName,
@@ -42,6 +42,27 @@ const oldCorrection = {
 } as AudioEvent;
 
 describe("reviewed common and scientific names", () => {
+  it("suppresses a scientific fallback despite its candidate suffix without inventing a common name", () => {
+    const scientific = "Anabasis obliquifasciella";
+    for (const suffix of [
+      " — candidate",
+      " – candidate",
+      " · candidate",
+      " - Candidate",
+      "",
+    ]) {
+      expect(scientificSubtitle(scientific + suffix, scientific)).toBeNull();
+    }
+    expect(
+      scientificSubtitle("Indian Pitta — candidate", "Pitta brachyura"),
+    ).toBe("Pitta brachyura");
+    expect(
+      scientificSubtitle(
+        "Anabasis obliquifasciella complex — candidate",
+        scientific,
+      ),
+    ).toBe(scientific);
+  });
   it("resolves an older corrected Indian Pitta record by its saved taxon", () => {
     expect(displayLabel(oldCorrection, names)).toBe("Indian Pitta");
     expect(displayScientificName(oldCorrection, names)).toBe("Pitta brachyura");

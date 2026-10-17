@@ -21,7 +21,8 @@ export type IconName =
   | "play"
   | "shield"
   | "link"
-  | "power";
+  | "power"
+  | "display";
 const paths: Record<IconName, string> = {
   camera: "M14 7h-3L9 4H5L3 7H1v12h20V7h-4M15 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
   library: "M4 3v18M9 3v18M14 5l5-1 4 16-5 1-4-16Z",
@@ -44,6 +45,7 @@ const paths: Record<IconName, string> = {
   shield: "M12 3 4 6v6c0 5 8 9 8 9s8-4 8-9V6l-8-3Zm-4 9 3 3 5-6",
   link: "m9 15 6-6M8 16l-1 1a4 4 0 0 1-6-6l4-4a4 4 0 0 1 6 0m2 10a4 4 0 0 0 6 0l4-4a4 4 0 0 0-6-6l-1 1",
   power: "M12 2v10M6 5a9 9 0 1 0 12 0",
+  display: "M2 19 8 5l6 14M4 14h8m3-3h7m-3.5 0v8",
 };
 
 export default function Icon({

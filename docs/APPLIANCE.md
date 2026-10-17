@@ -67,9 +67,12 @@ detect every possible GPU/native-code hang; no watchdog or hardware reset is cla
 With automatic observation enabled, startup uses the saved camera and current saved
 analysis settings. Network/camera delays retain the pending camera session and use its
 bounded-backoff reconnect behavior. Model warmup is allowed to finish. Terminal failed
-sessions receive up to three start attempts, separated by five seconds. Configuration
-or credential-load errors stop automatic startup with a visible safe message. Check the
-Device access state and use **Start observing** after repairing a terminal error.
+sessions before the first successful connection receive up to three start attempts with
+exponential delay. After a successful connection, supervision continues: a fatal owned-session
+failure retries after 5 seconds, increasing to a maximum of 5 minutes. A stable minute resets
+that delay. Ordinary network reconnects remain within the capture worker. Authentication
+failures and invalid saved configuration stop retrying until repaired. Check the Device access
+state and use **Start observing** after repairing a terminal error.
 
 A manual camera start, Stop action or file-analysis request takes priority over a pending
 automatic attempt. Stop suppresses automatic observation for the remainder of that

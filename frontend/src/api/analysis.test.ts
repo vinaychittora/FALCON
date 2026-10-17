@@ -79,6 +79,19 @@ describe("saved analysis selection and engine ownership", () => {
 });
 
 describe("analysis controls", () => {
+  it("passes ownership when resuming a temporary test without changing its settings", async () => {
+    vi.mocked(api).mockResolvedValue({ ...paused, status: "queued" });
+    await controlAnalysis(
+      "resume",
+      paused,
+      paused.source_id,
+      "temporary-session",
+    );
+    expect(api).toHaveBeenCalledExactlyOnceWith("/jobs/selected-run/resume", {
+      method: "POST",
+      headers: { "X-Falcon-Test-Session": "temporary-session" },
+    });
+  });
   it("resumes the same historical job without sending current system settings", async () => {
     vi.mocked(api).mockResolvedValue({ ...paused, status: "queued" });
     await controlAnalysis("resume", paused, paused.source_id);

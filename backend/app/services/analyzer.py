@@ -79,7 +79,7 @@ class Analyzer:
             raise
         return job
 
-    def start(self, path: Path, video: Video, config: AnalysisSettings) -> Job:
+    def start(self, path: Path, video: Video, config: AnalysisSettings, *, job_id: str | None = None) -> Job:
         if video.media_kind == "audio" and not config.audio_enabled:
             raise ValueError("Enable audio analysis to analyze a sound recording")
         taxa = self.taxa.read()
@@ -88,7 +88,7 @@ class Analyzer:
                 "Build the Rajasthan taxa cache before analysis (make taxa or Refresh taxa)."
             )
         job = Job(
-            job_id=str(uuid4()),
+            job_id=job_id or str(uuid4()),
             source_id=video.source_id,
             created_at=now(),
             analysis_config=config.model_dump(mode="json", exclude={"site_lat", "site_lon"}),

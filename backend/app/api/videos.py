@@ -2,6 +2,7 @@ import errno
 import os
 import re
 import subprocess
+from contextlib import nullcontext
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from PIL import Image
 
+from app.api.test_sessions import session_header
 from app.media.probe import EXTENSIONS, probe
 from app.schemas import Video, VideoCatalog
 from app.services.review_names import resolve_review_names
@@ -18,6 +20,21 @@ router = APIRouter(prefix="/api/videos", tags=["videos"])
 
 @router.post("/upload", response_model=Video, status_code=201)
 def upload_media(file: UploadFile, request: Request) -> Video:
+    identity = session_header(request)
+    sessions = getattr(request.app.state, "test_sessions", None)
+    if identity and sessions is None:
+        file.file.close()
+        raise HTTPException(503, "Temporary media sessions are unavailable")
+    try:
+        with sessions.operation(identity) if sessions else nullcontext():
+            return _upload_media(file, request, identity)
+    except (KeyError, ValueError):
+        raise HTTPException(410, "Temporary media session ended or expired") from None
+    finally:
+        file.file.close()
+
+
+def _upload_media(file: UploadFile, request: Request, identity: str | None) -> Video:
     name = Path((file.filename or "upload").replace("\\", "/")).name
     name = re.sub(r"[^\w.() -]", "_", name)[:180]
     suffix = Path(name).suffix.lower()
@@ -30,6 +47,8 @@ def upload_media(file: UploadFile, request: Request) -> Video:
     # Keep partial uploads outside the scanned catalog.
     temporary = request.app.state.config.data_dir / "temp" / f"upload-{uuid4().hex}{suffix}"
     temporary.parent.mkdir(parents=True, exist_ok=True)
+    if identity:
+        request.app.state.test_sessions.reserve_partial_upload(identity, temporary)
     limit = request.app.state.config.upload_limit_bytes
     size = 0
     try:
@@ -59,14 +78,22 @@ def upload_media(file: UploadFile, request: Request) -> Video:
         library = request.app.state.library
         library.scan()
         if media.source_id in library.paths:
+            if identity:
+                request.app.state.test_sessions.borrow_source(identity, media.source_id)
+            elif sessions := getattr(request.app.state, "test_sessions", None):
+                sessions.keep_source(media.source_id)
             return library.get(media.source_id)[1]
-        target = directory / name
+        target = directory / (f"test-{identity[:8]}-{uuid4().hex[:8]}-{name}" if identity else name)
         # link() is atomic and refuses to overwrite any existing original, even in a race.
         while True:
             try:
+                if identity:
+                    request.app.state.test_sessions.reserve_upload(identity, target, media.source_id, temporary.stat())
                 os.link(temporary, target)
                 break
             except FileExistsError:
+                if identity:
+                    request.app.state.test_sessions.forget_upload_reservation(identity, target)
                 target = directory / f"{Path(name).stem}-{uuid4().hex[:8]}{suffix}"
         return library.metadata(target)
     except OSError as exc:
@@ -76,6 +103,8 @@ def upload_media(file: UploadFile, request: Request) -> Video:
     finally:
         try:
             temporary.unlink(missing_ok=True)
+            if identity:
+                request.app.state.test_sessions.forget_partial_upload(identity, temporary)
         finally:
             file.file.close()
 

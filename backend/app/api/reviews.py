@@ -7,6 +7,7 @@ from app.schemas import Event, Review
 from app.services.review_names import resolve_review_names
 from app.storage.jobs import now
 from app.storage.jsonl import match_score, normalize
+from app.storage.observation_context import enrich_events
 
 router = APIRouter(prefix="/api/detections", tags=["reviews"])
 
@@ -25,6 +26,7 @@ def observation_archive(
     review_status: Literal["unreviewed", "correct", "corrected", "unknown", "false_positive"]
     | None = None,
     modality: Literal["visual", "audio"] | None = None,
+    scope: Literal["live", "all"] = "all",
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> ObservationPage:
@@ -47,6 +49,7 @@ def observation_archive(
             limit=limit,
             offset=offset,
             name_aliases=aliases,
+            scope=scope,
         )
     )
 
@@ -55,8 +58,8 @@ def observation_archive(
 
 
 @router.get("/sources")
-def observation_sources(request: Request) -> dict[str, Any]:
-    return {"sources": request.app.state.events.sources()}
+def observation_sources(request: Request, scope: Literal["live", "all"] = "all") -> dict[str, Any]:
+    return {"sources": request.app.state.events.sources(scope=scope)}
 
 
 @router.post("/{event_id}/review", response_model=Event)
@@ -82,6 +85,7 @@ def review(event_id: str, body: Review, request: Request) -> Event:
     try:
         updated = request.app.state.events.review(event_id, body)
         request.app.state.live.update_review(event_id, updated.review)
-        return updated
+        with request.app.state.events.database.connection() as connection:
+            return enrich_events(connection, [updated])[0]
     except KeyError as exc:
         raise HTTPException(404, "Detection not found") from exc

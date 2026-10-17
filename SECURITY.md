@@ -43,11 +43,33 @@ against an attacker who can read both the database and key. Protect the device a
 use disk encryption where needed. Backups that retain the camera account must keep
 both files private. Forgetting a camera profile does not erase older backups.
 
-The application does not send media to a hosted inference API. Installation/model
-downloads and taxonomy requests contact upstream services. Provider access logs can
-include your network address. Logs and exported records are not automatically safe
-for sharing; inspect and redact them first. The browser application caches only its
+The application does not send media to a hosted inference API. At application
+startup it disables optional Hugging Face telemetry, implicit use of locally saved
+Hugging Face tokens, Hub update checks, and Ultralytics online probes/reporting and
+automatic package installation before those libraries are imported. These settings
+are process-local privacy controls, not a firewall or a promise of no network use.
+Existing running processes need a restart to pick up changed startup policy.
+
+Expected outbound application traffic is limited to these functions:
+
+- The selected camera connection carries RTSP video/audio on the configured network.
+- Model preparation, including first use, can fetch public model files/configuration from
+  Hugging Face and its file hosts, Zenodo, and the BirdNET model host. Inference
+  frames, audio and observations are not uploaded in these downloads.
+- A requested taxonomy refresh queries iNaturalist for region/species information.
+  It does not submit the device's observations, media or saved camera credentials.
+- The **Check connection** button makes a HEAD request to `https://tailscale.com/`.
+  There is no periodic internet-check beacon. Tailscale, if separately installed
+  and enabled, has its own coordination/relay traffic and privacy policy.
+- Installation and explicit dependency updates contact package/tool providers.
+
+Provider access logs can include your network address and requested model, region,
+or species identifiers. Logs and exported records are not automatically safe for
+sharing; inspect and redact them first. The browser application caches only its
 public interface assets, not API responses, camera previews or uploaded media.
+FALCON's loopback checks do not audit other programs, the router, camera vendor
+cloud features, or the complete operating system. A socket check is a point-in-time
+observation, not proof that no earlier or future connection can occur.
 
 ## Public source release
 

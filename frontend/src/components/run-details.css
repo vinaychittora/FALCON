@@ -2,6 +2,19 @@
   padding: 28px;
   font-variant-numeric: tabular-nums lining-nums;
 }
+.media-test-diagnostics {
+  margin-top: 24px;
+}
+.media-test-diagnostics > summary,
+.media-test-records > summary {
+  padding: 18px 28px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+.media-test-records {
+  border-top: 1px solid var(--line);
+}
 .run-heading {
   display: flex;
   justify-content: space-between;
@@ -14,13 +27,13 @@
 }
 .run-eyebrow {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 1.2px;
 }
 .run-source h3 {
   margin: 7px 0 8px;
-  font-size: 21px;
+  font-size: 1.3125rem;
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -29,7 +42,7 @@
 .run-source p {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 0.875rem;
   line-height: 1.6;
 }
 .run-status {
@@ -42,8 +55,8 @@
   padding: 7px 12px;
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: #f6f7f8;
-  font-size: 11px;
+  background: var(--cream);
+  font-size: 0.8125rem;
   text-transform: capitalize;
   color: var(--muted);
 }
@@ -55,30 +68,30 @@
 }
 .run-status-running,
 .run-status-completed {
-  background: #f0f6f2;
-  border-color: #dce9e1;
-  color: #39634e;
+  background: var(--success-surface);
+  border-color: var(--success-line);
+  color: var(--success);
 }
 .run-status-pausing,
 .run-status-paused {
-  background: #faf6ee;
-  border-color: #eae1ce;
-  color: #866a32;
+  background: var(--warning-surface);
+  border-color: var(--warning-line);
+  color: var(--warning);
 }
 .run-status-failed {
-  background: #fbf2f0;
-  border-color: #ecd9d4;
-  color: #9b4e40;
+  background: var(--danger-surface);
+  border-color: var(--danger-line);
+  color: var(--danger);
 }
 .run-progress-label {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 20px;
-  font-size: 11px;
+  font-size: 0.8125rem;
   color: var(--muted);
   margin-bottom: 9px;
-  line-height: 18px;
+  line-height: 1.25rem;
 }
 .run-progress-label span {
   text-transform: capitalize;
@@ -93,14 +106,14 @@
 }
 .run-progress-track {
   height: 4px;
-  background: #edf0f1;
+  background: var(--line-subtle);
   border-radius: 3px;
   overflow: hidden;
 }
 .run-progress-track span {
   display: block;
   height: 100%;
-  background: #63866f;
+  background: var(--forest);
 }
 .run-summary {
   display: grid;
@@ -125,25 +138,25 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--muted);
-  white-space: nowrap;
+  flex-wrap: wrap;
 }
 .run-summary-item svg {
   flex-shrink: 0;
-  color: #607f86;
+  color: var(--icon);
 }
 .run-summary-item dd {
   margin: 13px 0 7px;
-  font-size: clamp(22px, 2vw, 29px);
-  line-height: 36px;
+  font-size: clamp(1.375rem, 2vw, 1.8125rem);
+  line-height: 1.35;
   letter-spacing: -0.7px;
   font-weight: 550;
   white-space: nowrap;
 }
 .run-summary-item small,
 .run-metric-group small {
-  font-size: 11px;
+  font-size: 0.8125rem;
   letter-spacing: 0;
   font-weight: 400;
   color: var(--muted);
@@ -152,8 +165,8 @@
 .run-summary-caption {
   display: block;
   color: var(--muted);
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
   min-height: 32px;
 }
 .run-metric-groups {
@@ -169,12 +182,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 12px;
+  font-size: 0.875rem;
   font-weight: 600;
   margin: 0 0 12px;
 }
 .run-metric-group h4 svg {
-  color: #607f86;
+  color: var(--icon);
 }
 .run-metric-group dl {
   margin: 0;
@@ -184,18 +197,19 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 43px;
-  border-bottom: 1px solid #edf0f1;
+  min-height: 2.875rem;
+  padding-block: 0.5rem;
+  border-bottom: 1px solid var(--line-subtle);
 }
 .run-metric-group dt {
-  font-size: 11px;
+  font-size: 0.8125rem;
   color: var(--muted);
-  line-height: 16px;
+  line-height: 1.5;
 }
 .run-metric-group dd {
   margin: 0;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 0.875rem;
   font-weight: 500;
   text-align: right;
 }
@@ -204,10 +218,10 @@
 }
 .run-disclosure > summary {
   padding: 14px 0;
-  font-size: 12px;
+  font-size: 0.875rem;
   color: var(--muted);
   cursor: pointer;
-  line-height: 20px;
+  line-height: 1.25rem;
 }
 .run-log-count {
   display: inline-block;
@@ -216,8 +230,8 @@
   margin-left: 7px;
   padding: 0 5px;
   border-radius: 4px;
-  background: #f0f3f5;
-  font-size: 10px;
+  background: var(--surface-muted);
+  font-size: 0.75rem;
 }
 .run-log-scroll {
   height: 220px;
@@ -226,8 +240,8 @@
   border: 1px solid var(--line);
   border-radius: 7px;
   padding: 12px 18px;
-  background: #fafbfc;
-  font-size: 11px;
+  background: var(--surface-muted);
+  font-size: 0.875rem;
   line-height: 1.9;
   color: var(--muted);
 }
@@ -241,7 +255,7 @@
 }
 .run-measurement-notes {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 0.875rem;
   line-height: 1.8;
   padding-bottom: 14px;
 }
@@ -268,16 +282,16 @@
   color: var(--muted);
 }
 .run-empty svg {
-  color: #607f86;
+  color: var(--icon);
 }
 .run-empty h3 {
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 500;
 }
 .run-empty p {
-  font-size: 12px;
+  font-size: 0.875rem;
 }
-@media (max-width: 1100px) {
+@media (max-width: 68.75rem) {
   .run-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     row-gap: 24px;
@@ -298,7 +312,7 @@
     gap: 10px;
   }
   .run-source h3 {
-    font-size: 18px;
+    font-size: 1.125rem;
   }
   .run-status {
     min-width: 80px;
@@ -308,11 +322,11 @@
     padding-inline: 12px;
   }
   .run-summary-item dt {
-    font-size: 11px;
+    font-size: 0.8125rem;
     gap: 5px;
   }
   .run-summary-item dd {
-    font-size: 22px;
+    font-size: 1.375rem;
   }
   .run-metric-groups {
     grid-template-columns: minmax(0, 1fr);
@@ -324,5 +338,24 @@
   .run-measurement-notes dl > div {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
+  }
+}
+
+@media (max-width: 580px) {
+  .run-heading {
+    flex-wrap: wrap;
+  }
+  .run-status {
+    min-width: 0;
+  }
+}
+@media (max-width: 420px) {
+  .run-summary {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 1.25rem;
+  }
+  .run-summary-item {
+    border-left: 0;
+    padding-inline: 0;
   }
 }

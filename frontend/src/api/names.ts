@@ -11,6 +11,17 @@ export interface TaxonNameIndex {
 }
 const scientificKey = (name: string) => name.trim().toLocaleLowerCase("en");
 
+/** A candidate marker is status metadata, not an additional species name. */
+export function scientificSubtitle(
+  primary: string,
+  scientific?: string | null,
+) {
+  const name = scientific?.trim();
+  if (!name) return null;
+  const primaryName = primary.trim().replace(/\s+[—–·-]\s*candidate$/i, "");
+  return scientificKey(primaryName) === scientificKey(name) ? null : name;
+}
+
 export function indexTaxonNames(taxa: readonly TaxonName[]): TaxonNameIndex {
   return {
     byId: new Map(taxa.map((taxon) => [taxon.taxon_id, taxon])),
