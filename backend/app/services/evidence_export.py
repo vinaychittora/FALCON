@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import sqlite3
 import tempfile
 from collections.abc import Iterable, Iterator
@@ -28,7 +29,7 @@ OBSERVATION_COLUMNS = [
     "model_score", "model_score_type", "detector_confidence", "review_status",
     "reviewed_at", "review_notes", "evidence_ids", "bbox_left", "bbox_top", "bbox_right",
     "bbox_bottom", "sensor_status", "sensor_id", "sensor_observed_at", "sensor_age_seconds",
-    "temperature_c", "humidity_percent", "pressure_hpa", "models_json",
+    "temperature_c", "humidity_percent", "pressure_hpa", "surface_wet", "models_json",
 ]
 EVIDENCE_COLUMNS = [
     "evidence_id", "source_id", "session_id", "job_id", "media_kind", "status", "captured_at",
@@ -36,9 +37,19 @@ EVIDENCE_COLUMNS = [
     "duration_ms", "size_bytes", "sha256", "mime_type", "audio_present", "event_ids",
     "archive_path", "archive_status", "message",
 ]
+EXPORT_FREE_SPACE_RESERVE = 512 * 1024**2
+EXPORT_METADATA_ALLOWANCE = 64 * 1024**2
+
+
+class InsufficientExportSpace(OSError):
+    def __init__(self, required: int):
+        super().__init__("Not enough free storage to build this export")
+        self.required = required
+
+
 SENSOR_COLUMNS = [
     "schema_version", "reading_id", "sensor_id", "observed_at", "received_at",
-    "temperature_c", "humidity_percent", "pressure_hpa", "quality", "quality_note",
+    "temperature_c", "humidity_percent", "pressure_hpa", "surface_wet", "quality", "quality_note",
 ]
 
 
@@ -65,7 +76,7 @@ def _observation_row(
         accepted_scientific = event.review.corrected_scientific_name
         accepted_common = event.review.corrected_common_name
         identification = "reviewed"
-    elif status in {"unknown", "false_positive"}:
+    elif status in {"unknown", "false_positive", "discarded"}:
         accepted_scientific, accepted_common, identification = None, None, status
     elif event.modality == "visual" and event.classification.status != "candidate":
         accepted_scientific, accepted_common = None, None
@@ -90,6 +101,7 @@ def _observation_row(
         "sensor_id": environment.sensor_id, "sensor_observed_at": environment.observed_at,
         "sensor_age_seconds": environment.age_seconds, "temperature_c": environment.temperature_c,
         "humidity_percent": environment.humidity_percent, "pressure_hpa": environment.pressure_hpa,
+        "surface_wet": environment.surface_wet,
         "models_json": event.models,
     }
     if event.modality == "visual":
@@ -271,6 +283,12 @@ def build_evidence_archive(
     for record in evidence:
         for event_id in record.event_ids:
             links.setdefault(event_id, []).append(record.evidence_id)
+    # The archive is built beside the evidence before delivery. Refuse early rather
+    # than consume the space live capture and SQLite need.
+    media_bytes = sum(record.size_bytes for record in evidence if record.status in {"ready", "partial"})
+    required = media_bytes + EXPORT_METADATA_ALLOWANCE + EXPORT_FREE_SPACE_RESERVE
+    if shutil.disk_usage(store.root).free < required:
+        raise InsufficientExportSpace(required)
     descriptor, filename = tempfile.mkstemp(prefix="falcon-evidence-", suffix=".zip", dir=store.root)
     os.close(descriptor)
     path = Path(filename)
@@ -334,6 +352,7 @@ def build_evidence_archive(
                 "Unfiltered field exports include all local sensor readings. Source-filtered exports require a recorded session sensor ID and time bounds; otherwise readings are omitted with a manifest warning.\n"
                 "Only an explicitly active live session uses export time as its open interval end; historical sessions without an end time are excluded from source-specific sensor association.\n"
                 "Sensor observed_at comes from the node clock; received_at is the server clock. Quality flags and explicit Celsius, percent and hPa units are retained.\n"
+                "surface_wet is a rain-plate wetness state (rain or dew), not a rainfall amount.\n"
                 "CSV text beginning with spreadsheet formula characters is prefixed with an apostrophe; JSONL retains original text.\n"
                 "manifest.json lists SHA-256 checksums of all other archive files.\n"
             ))

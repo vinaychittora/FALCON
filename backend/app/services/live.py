@@ -24,16 +24,22 @@ from app.media.rtsp_source import AudioChunk, RTSPSource
 from app.schemas import AnalysisSettings, AudioEvent, Review, Video, VisualEvent
 from app.schemas_live import LiveStart, LiveState
 from app.services.analyzer import Analyzer
+from app.services.clock import SessionClock, system_clock_synchronized
 from app.services.encounter_evidence import EncounterEvidence
 from app.services.model_registry import package_version
+from app.services.thumbnails import ThumbnailService
 from app.storage.evidence import EvidenceStore
 from app.taxonomy.inaturalist import TaxaCache
 
 
 class LiveService:
-    def __init__(self, analyzer: Analyzer, evidence_store: EvidenceStore | None = None):
+    def __init__(
+        self, analyzer: Analyzer, evidence_store: EvidenceStore | None = None,
+        thumbnails: ThumbnailService | None = None,
+    ):
         self.analyzer = analyzer
         self.evidence_store = evidence_store
+        self.thumbnails = thumbnails
         self._evidence: EncounterEvidence | None = None
         self._mutex = threading.RLock()
         self._state = LiveState()
@@ -47,6 +53,10 @@ class LiveService:
         self._audio: deque[AudioEvent] = deque(maxlen=200)
         self._audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=1)
         self._lease: BinaryIO | None = None
+        self._clock: SessionClock | None = None
+        # Monotonic times used to detect a session that stops making progress.
+        self._progress_at = 0.0
+        self._stopping_since = 0.0
 
     def start(self, request: LiveStart) -> LiveState:
         if not self.analyzer.taxa.read().taxa:
@@ -67,14 +77,17 @@ class LiveService:
                 self._preview = None
                 self._evidence = None
                 self._last_frame_at = 0
+                self._progress_at = self._stopping_since = 0.0
                 self._fresh_ms = min(4000, max(1500, round(2000 / request.config.sample_fps)))
                 self._audio.clear()
                 self._audio_queue = queue.Queue(maxsize=1)
+                started_at = datetime.now(UTC)
+                self._clock = SessionClock(started_at, self._started)
                 self._state = LiveState(
                     status="connecting",
                     session_id=str(uuid4()),
                     name=request.name,
-                    started_at=datetime.now(UTC).isoformat(),
+                    started_at=started_at.isoformat(),
                     audio_status="waiting for camera"
                     if request.config.audio_enabled
                     else "disabled",
@@ -111,6 +124,8 @@ class LiveService:
     def stop(self, wait: bool = False) -> LiveState:
         with self._mutex:
             if self._worker and self._worker.is_alive():
+                if self._state.status != "stopping":
+                    self._stopping_since = time.monotonic()
                 self._state.status = "stopping"
                 self._cancel.set()
                 self._state.visual = []
@@ -163,6 +178,23 @@ class LiveService:
                 result.metrics["reconnects"] = self._source.reconnects
             return result
 
+    def stuck_for(self) -> float:
+        """Seconds without progress while frames should be analyzed, or while stopping.
+
+        A camera outage is not a stall: reconnecting sessions report zero. Progress
+        restarts its clock when the stream becomes live again.
+        """
+        with self._mutex:
+            now = time.monotonic()
+            if self._state.status == "stopping" and self._stopping_since:
+                return now - self._stopping_since
+            if (
+                self._state.status == "live" and self._progress_at
+                and self._state.metrics.get("inference_status") == "processing"
+            ):
+                return now - self._progress_at
+            return 0.0
+
     def jpeg(self) -> bytes | None:
         with self._mutex:
             if time.monotonic() - self._last_frame_at > 5 or self._state.status != "live":
@@ -176,6 +208,16 @@ class LiveService:
                 if event.event_id == event_id:
                     event.review = review.model_copy(deep=True)
 
+    def _session_sensor_id(self) -> str | None:
+        resolve = getattr(self.analyzer.sensors, "session_sensor_id", None)
+        if callable(resolve):
+            try:
+                value = resolve()
+                return value if isinstance(value, str) else None
+            except Exception:
+                return self.analyzer.settings.sensor_id
+        return self.analyzer.settings.sensor_id
+
     def _message(self, message: str) -> None:
         with self._mutex:
             if not self._state.messages or self._state.messages[-1] != message:
@@ -185,6 +227,8 @@ class LiveService:
         with self._mutex:
             if self._cancel.is_set() or self._state.status == "failed":
                 return
+            if status == "live" and self._state.status != "live":
+                self._progress_at = time.monotonic()
             self._state.status = cast(
                 Literal["connecting", "live", "reconnecting", "failed"], status
             )
@@ -233,17 +277,28 @@ class LiveService:
             source_id = session_id.replace("-", "")[:24]
             config = request.config.model_copy(update={"max_seconds": None})
             taxa = self.analyzer.taxa.read()
+            # Every session time is start time + elapsed time, so a wrong clock at
+            # start shifts the whole session. Record what the system reported.
+            synchronized = system_clock_synchronized()
+            with self._mutex:
+                self._state.metrics["clock_synchronized"] = (
+                    "unknown" if synchronized is None else "yes" if synchronized else "no"
+                )
+            if synchronized is False:
+                self._message("This computer's clock is not synchronized; recorded times may be offset.")
             if self.evidence_store and self._state.started_at:
                 try:
                     self.evidence_store.register_session(
                         session_id, source_id, request.name, self._state.started_at,
                         {
                             **config.model_dump(mode="json"), "evidence_mode": "encounter_clips",
-                            "evidence_seconds": 5, "sensor_id": self.analyzer.settings.sensor_id,
+                            "evidence_seconds": 5, "sensor_id": self._session_sensor_id(),
+                            **({} if synchronized is None else {"clock_synchronized": synchronized}),
                         },
                     )
                     self._evidence = EncounterEvidence(
                         self.evidence_store, session_id, source_id, self._state.started_at,
+                        clock=self._clock.at if self._clock else None,
                     )
                 except Exception:
                     self._message("Evidence recording is unavailable. Observations will still be saved; check local storage.")
@@ -279,11 +334,17 @@ class LiveService:
                 self._source.condition.wait_for(
                     lambda: (
                         self._cancel.is_set()
-                        or self._source is not None
-                        and self._source.latest is not None
+                        or (self._source is not None
+                        and (self._source.latest is not None or self._source.audio_only))
                     ),
                 )
             if self._cancel.is_set():
+                raise Cancelled()
+            if self._source.audio_only:
+                with self._mutex:
+                    self._state.metrics.update({"inference_status": "audio only", "audio_only": 1})
+                self._message("This source has no camera; only sound is analyzed.")
+                self._cancel.wait()
                 raise Cancelled()
             with self._mutex:
                 self._state.metrics["inference_status"] = "loading models"
@@ -329,14 +390,12 @@ class LiveService:
                         "inference_status": "processing",
                     }
                 )
+                self._progress_at = time.monotonic()
 
             def emit(event: VisualEvent) -> None:
                 event.source_kind = "live"
                 event.time_basis = "server_receive_time"
-                event.captured_at = (
-                    datetime.fromisoformat(self._state.started_at)
-                    + timedelta(milliseconds=event.timestamp_ms)
-                ).isoformat() if self._state.started_at else None
+                event.captured_at = self._clock.at(event.timestamp_ms).isoformat() if self._clock else None
                 self.analyzer.events.append(event)
                 if self._evidence:
                     self._evidence.visual(event)
@@ -353,6 +412,7 @@ class LiveService:
 
             def progress(coverage: int) -> None:
                 with self._mutex:
+                    self._progress_at = time.monotonic()
                     frame_time = coverage - round(1000 / config.sample_fps)
                     if self._state.visual and self._state.visual[0].timestamp_ms != frame_time:
                         self._state.visual = []
@@ -377,6 +437,7 @@ class LiveService:
                 self._cancel,
                 self.analyzer.sensors,
                 frame_context=self._evidence.frame_context if self._evidence else None,
+                crop_sink=self.thumbnails.remember if self.thumbnails else None,
             )
             with self._mutex:
                 self._state.metrics.update(metrics)
@@ -422,14 +483,15 @@ class LiveService:
                     self._state.metrics.update(self._source.technical_metrics())
                 if self._state.status != "failed":
                     self._state.status = "stopped"
+                self._stopping_since = 0.0
                 self._source = None
             if self.evidence_store and self._state.session_id and self._state.started_at:
                 try:
                     self.evidence_store.finish_session(
                         self._state.session_id,
-                        datetime.fromisoformat(self._state.started_at) + timedelta(
-                            milliseconds=self._state.session_timestamp_ms
-                        ),
+                        self._clock.at(self._state.session_timestamp_ms) if self._clock
+                        else datetime.fromisoformat(self._state.started_at)
+                        + timedelta(milliseconds=self._state.session_timestamp_ms),
                         "failed" if self._state.status == "failed" else "stopped",
                         {**self._state.metrics, **(self._evidence.metrics() if self._evidence else {})},
                     )
@@ -478,18 +540,22 @@ class LiveService:
                         audio=True,
                         size_bytes=len(chunk.pcm),
                     )
+                    # Location filtering needs the current week; live sessions have no
+                    # recording date, which previously meant a year-round species list.
+                    window_config = config
+                    if config.week is None and self._state.started_at:
+                        heard_on = (
+                            self._clock.at(chunk.start_ms) if self._clock
+                            else datetime.fromisoformat(self._state.started_at) + timedelta(milliseconds=chunk.start_ms)
+                        ).date()
+                        window_config = config.model_copy(update={"recording_date": heard_on})
                     events, metrics = birdnet.analyze(
-                        wav, video, session_id, config, taxa, self._cancel, self._message
+                        wav, video, session_id, window_config, taxa, self._cancel, self._message
                     )
                 for event in events:
                     event.start_ms += chunk.start_ms
                     event.end_ms += chunk.start_ms
-                    received_at = (
-                        datetime.fromisoformat(self._state.started_at)
-                        + timedelta(milliseconds=event.start_ms)
-                        if self._state.started_at
-                        else None
-                    )
+                    received_at = self._clock.at(event.start_ms) if self._clock else None
                     event.environment = self.analyzer.sensors.snapshot(received_at)
                     event.source_kind = "live"
                     event.time_basis = "server_receive_time"

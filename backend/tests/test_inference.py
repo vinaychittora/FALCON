@@ -246,3 +246,73 @@ def test_tile_fragment_does_not_replace_complete_proposal() -> None:
 def test_prompt_templates_accept_only_literal_supported_fields(template: str) -> None:
     with pytest.raises(ValueError, match="placeholders"):
         AnalysisSettings(prompt_templates=[template])
+
+
+def test_fixed_camera_motion_from_a_person_is_not_classified_as_wildlife(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.inference.pipeline as pipeline
+
+    person = (0.40, 0.20, 0.60, 0.90)
+
+    class Source:
+        def frames(self, fps: float, max_seconds: float | None = None) -> Iterator[Frame]:
+            rng = np.random.default_rng(1)
+            for ms in [0, 1000, 2000]:
+                yield Frame(ms, rng.integers(0, 255, (180, 320, 3), dtype=np.uint8))
+
+    class Detector:
+        def detect(self, rgb: NDArray[np.uint8], threshold: float) -> list[Proposal]:
+            return [Proposal(person, 0.93, "person")]
+
+    class Motion:
+        def detect(self, rgb: NDArray[np.uint8]) -> list[Proposal]:
+            # A partial blob (legs and shadow) and an unrelated animal-sized blob.
+            return [
+                Proposal((0.41, 0.55, 0.59, 0.95), None, "motion", "OpenCV-MOG2"),
+                Proposal((0.05, 0.60, 0.20, 0.80), None, "motion", "OpenCV-MOG2"),
+            ]
+
+    class Classifier:
+        def scores(self, crops: list[Image.Image]) -> NDArray[np.float32]:
+            return np.array([[0.4, 0.2, 0.1, 0.09, 0.08]], dtype=np.float32)
+
+    monkeypatch.setattr(pipeline, "MotionDetector", Motion)
+    video = Video(
+        source_id="a" * 24, filename="camera", duration_ms=10_000, width=320, height=180,
+        fps=1, codec="rtsp", audio=False, size_bytes=0,
+    )
+    events: list[VisualEvent] = []
+    visual_pipeline(
+        Source(), video, "test", AnalysisSettings(fixed_camera=True, sample_fps=1), taxa(),
+        Detector(), Classifier(), {}, events.append, lambda _: None, Event(),
+    )
+    assert len(events) == 3
+    assert all(event.bbox_norm == (0.05, 0.60, 0.20, 0.80) for event in events)
+    assert all(event.models["motion_filter_version"] == "non-wildlife-overlap-v1" for event in events)
+
+
+def test_domestic_animals_are_labelled_as_domestic_not_wild() -> None:
+    from app.taxonomy.domestic import resolve_domestic_ids
+
+    cache = TaxaCache(version="t", taxa=[
+        Taxon(taxon_id=1, scientific_name="Bos taurus", common_name="Cattle", group="Mammalia",
+              iconic_group="Mammalia", observation_count=0),
+        Taxon(taxon_id=2, scientific_name="Boselaphus tragocamelus", common_name="Nilgai",
+              group="Mammalia", iconic_group="Mammalia", observation_count=9),
+    ])
+    config = AnalysisSettings()
+    cow = classify_label(np.array([0.40, 0.20], dtype=np.float32), cache.taxa, config)
+    nilgai = classify_label(np.array([0.20, 0.40], dtype=np.float32), cache.taxa, config)
+    assert cow.display_label == "Cattle — domestic animal candidate"
+    assert nilgai.display_label == "Nilgai — candidate"
+
+    def lookup(path: str, params: dict) -> dict:
+        name = params["q"]
+        if name == "Equus asinus":
+            return {"results": []}
+        return {"results": [{"id": abs(hash(name)) % 10**6, "name": name, "rank": "species"},
+                            {"id": 7, "name": name + " ssp", "rank": "subspecies"}]}
+
+    ids, missing = resolve_domestic_ids(lookup)
+    assert missing == ["Equus asinus"] and len(ids) == 8

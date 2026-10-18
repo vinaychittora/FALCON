@@ -13,9 +13,9 @@ class Settings(BaseSettings):
     data_dir: Path = ROOT / "data"
     model_dir: Path = ROOT / "models"
     frontend_dir: Path = ROOT / "frontend" / "dist"
+    docs_dir: Path = ROOT / "docs"
     site_lat: float | None = None
     site_lon: float | None = None
-    save_reviewed_crops: bool = False
     debug_audio: bool = False
     sensor_ingest_token: SecretStr | None = None
     sensor_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}$")

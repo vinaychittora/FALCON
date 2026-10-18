@@ -81,7 +81,7 @@ def _number(value: object, maximum: float | None = None) -> float | None:
         result = float(value)
     except (ValueError, OverflowError):
         return None
-    if not math.isfinite(result) or result < 0 or maximum is not None and result > maximum:
+    if not math.isfinite(result) or result < 0 or (maximum is not None and result > maximum):
         return None
     return round(result, 2)
 

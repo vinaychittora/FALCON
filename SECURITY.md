@@ -26,6 +26,28 @@ multipart spooling require sufficient disk space; an explicit `UPLOAD_LIMIT_BYTE
 can impose a deployment limit. Control/JSON requests remain bounded. Do not enable
 an anonymous upload proxy. The app does not automatically delete recordings.
 
+## Sensor nodes
+
+A FALCON sensor node listens on the local network: its control API on port 8780 and its
+RTSP stream on port 8554. Each node has a random 120-bit pairing key, created by its
+installer and stored in `/etc/falcon-node/node.conf` (readable by root and the
+`falcon-node` service only) and, encrypted, in FALCON's database. Control requests are
+signed with HMAC-SHA256 over the method, path, time, a one-time value and the body hash,
+so the key is never sent and a captured request cannot be replayed. The RTSP read
+password is derived from the key; only processes on the node itself may publish to its
+stream server. The node's public status page and `/api/v1/info` show names, versions and
+detected hardware, never the key.
+
+The local network can still see the stream and readings (they are not encrypted), and
+anyone with physical access to the node can read its key from the SD card. Use a private
+network (or a separate Wi-Fi network) for nodes. If a node or its card is lost, give it a
+new key: delete the `PAIRING_KEY` line in `/etc/falcon-node/node.conf`, run
+`sudo bash node/install.sh` again, then pair it again in FALCON. The node service runs as an unprivileged user with only the permission to set the
+clock; polkit allows it to reboot or power off the node when FALCON asks.
+
+FALCON never accepts connections from nodes: it connects to them. Its own server stays on
+loopback, so a compromised node cannot control FALCON.
+
 ## Local storage
 
 `data/` contains private originals, observations, review decisions, camera profiles,
@@ -53,6 +75,8 @@ Existing running processes need a restart to pick up changed startup policy.
 Expected outbound application traffic is limited to these functions:
 
 - The selected camera connection carries RTSP video/audio on the configured network.
+- Paired sensor nodes are polled every few seconds over HTTP on the local network for status
+  and readings, and their RTSP stream is read while observing.
 - Model preparation, including first use, can fetch public model files/configuration from
   Hugging Face and its file hosts, Zenodo, and the BirdNET model host. Inference
   frames, audio and observations are not uploaded in these downloads.
@@ -65,8 +89,8 @@ Expected outbound application traffic is limited to these functions:
 
 Provider access logs can include your network address and requested model, region,
 or species identifiers. Logs and exported records are not automatically safe for
-sharing; inspect and redact them first. The browser application caches only its
-public interface assets, not API responses, camera previews or uploaded media.
+sharing; inspect and redact them first. The service worker caches only a generic
+offline-help page, not the working application, API responses, camera previews or media.
 FALCON's loopback checks do not audit other programs, the router, camera vendor
 cloud features, or the complete operating system. A socket check is a point-in-time
 observation, not proof that no earlier or future connection can occur.
@@ -77,7 +101,7 @@ Never publish this development checkout by simply adding a remote and pushing it
 history. `.gitignore` does not remove information already committed. The supported
 publication process exports only the exact files in `.public-release-files` into a
 new directory and never copies `.git`, local data or model weights. See
-[the release checklist](docs/PUBLIC_RELEASE.md).
+[the release checklist](docs/development/PUBLIC_RELEASE.md).
 
 The release scanner is a defense against common mistakes, not a proof that arbitrary
 source text contains no private information. Review new files, screenshots, examples,

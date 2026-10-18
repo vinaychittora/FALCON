@@ -12,17 +12,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.taxonomy.cache import atomic_json
 
-DEFAULT_LIMITS = {
-    "Aves": 1000,
-    "Mammalia": 1000,
-    "Reptilia": 1000,
-    "Amphibia": 1000,
-    "Lepidoptera": 1000,
-    "Odonata": 1000,
-    "Hymenoptera": 1000,
-    "Insecta": 1000,
-    "Arachnida": 1000,
-}
+# Species kept per group: None keeps every eligible species, 0 leaves the group out,
+# a number keeps that many of the most-observed species. The inference node has the
+# capacity for complete lists, so nothing is capped by default.
+GROUPS = ("Aves", "Mammalia", "Reptilia", "Amphibia", "Lepidoptera", "Odonata", "Hymenoptera", "Insecta", "Arachnida")
+DEFAULT_LIMITS: dict[str, int | None] = dict.fromkeys(GROUPS)
 
 
 class Taxon(BaseModel):
@@ -58,7 +52,7 @@ class TaxaCache(BaseModel):
     place_name: str = "Rajasthan, India"
     taxa: list[Taxon] = Field(default_factory=list)
     counts: dict[str, int] = Field(default_factory=dict)
-    limits: dict[str, int] = Field(default_factory=lambda: DEFAULT_LIMITS.copy())
+    limits: dict[str, int | None] = Field(default_factory=lambda: DEFAULT_LIMITS.copy())
     minimum_observations: int = 1
     coverage: dict[str, GroupCoverage] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
@@ -68,8 +62,14 @@ class TaxaCache(BaseModel):
     error: str | None = None
 
 
+DEFAULT_PLACE = "Rajasthan, India"
+
+
 class RefreshRequest(BaseModel):
-    limits: dict[str, int] = Field(default_factory=lambda: DEFAULT_LIMITS.copy())
+    # An iNaturalist place: "Kerala, India", "Kenya" or a numeric place ID.
+    # Omitted keeps the place of the current species list.
+    place: str | None = Field(default=None, min_length=1, max_length=120)
+    limits: dict[str, int | None] = Field(default_factory=lambda: DEFAULT_LIMITS.copy())
     minimum_observations: int = Field(default=1, ge=1, le=10000)
     # Omitted preserves existing explicit selections during refresh. [] clears them.
     additional_taxon_ids: list[Annotated[int, Field(gt=0)]] | None = Field(
@@ -78,9 +78,9 @@ class RefreshRequest(BaseModel):
 
     @field_validator("limits")
     @classmethod
-    def valid_limits(cls, limits: dict[str, int]) -> dict[str, int]:
-        if set(limits) - set(DEFAULT_LIMITS) or any(n < 0 or n > 1000 for n in limits.values()):
-            raise ValueError("Limits must be 0–1000 for supported groups")
+    def valid_limits(cls, limits: dict[str, int | None]) -> dict[str, int | None]:
+        if set(limits) - set(DEFAULT_LIMITS) or any(n is not None and n < 0 for n in limits.values()):
+            raise ValueError("Use supported groups with no limit (null), 0 to leave a group out, or a positive count")
         return limits
 
 
@@ -119,18 +119,47 @@ class INaturalist:
             return value
         raise RuntimeError("iNaturalist request failed")
 
-    def build(self, request: RefreshRequest, refresh: bool = False) -> TaxaCache:
-        places = self.get("places/autocomplete", {"q": "Rajasthan"}, refresh)["results"]
-        matches = [
-            p
-            for p in places
-            if p["name"] == "Rajasthan"
-            and p.get("display_name") in {"Rajasthan, IN", "Rajasthan, India"}
-            and p.get("admin_level") == 10
-        ]
+    def resolve_place(self, text: str, refresh: bool = False) -> dict[str, Any]:
+        """One iNaturalist place for a name such as "Rajasthan, India" or a numeric place ID."""
+        text = text.strip()
+        if text.isdigit():
+            results = self.get(f"places/{int(text)}", {}, refresh)["results"]
+            if len(results) != 1:
+                raise ValueError(f"iNaturalist place {text} was not found")
+            return dict(results[0])
+        name, _, region = (part.strip() for part in text.partition(","))
+        places = self.get("places/autocomplete", {"q": name}, refresh)["results"]
+        if text == DEFAULT_PLACE:
+            # The original, strictly checked Rajasthan state boundary.
+            matches = [
+                p for p in places
+                if p["name"] == "Rajasthan" and p.get("display_name") in {"Rajasthan, IN", "Rajasthan, India"}
+                and p.get("admin_level") == 10
+            ]
+        else:
+            folded = text.casefold()
+            matches = [p for p in places if str(p.get("display_name", "")).casefold() == folded]
+            if not matches:
+                named = [p for p in places if str(p.get("name", "")).casefold() == name.casefold()]
+                # iNaturalist shows countries as codes ("Kerala, IN"), so a written-out country
+                # name narrows the matches only when it appears in the display name.
+                regional = [p for p in named if region and region.casefold() in str(p.get("display_name", "")).casefold()]
+                matches = regional or named
+            standard = [p for p in matches if p.get("admin_level") is not None]
+            matches = standard or matches
         if len(matches) != 1:
-            raise ValueError("Could not unambiguously resolve Rajasthan, India")
-        place = matches[0]
+            options = "; ".join(str(p.get("display_name") or p.get("name")) for p in places[:6]) or "none"
+            raise ValueError(
+                f"Could not resolve one iNaturalist place for {text!r}. Matches: {options}. "
+                "Use the exact name shown, or the numeric place ID from inaturalist.org/places."
+            )
+        return dict(matches[0])
+
+    def build(self, request: RefreshRequest, refresh: bool = False) -> TaxaCache:
+        place = self.resolve_place(request.place or DEFAULT_PLACE, refresh)
+        place_name = str(place.get("display_name") or place.get("name") or request.place)
+        if place_name == "Rajasthan, IN":
+            place_name = DEFAULT_PLACE
         taxa: dict[int, Taxon] = {}
         names: set[str] = set()
         group_ids: dict[str, int] = {}
@@ -147,27 +176,25 @@ class INaturalist:
         coverage: dict[str, GroupCoverage] = {}
         warnings: list[str] = []
         for group, limit in request.limits.items():
-            if not limit:
+            if limit == 0:
                 warnings.append(f"{group} is disabled in this candidate list.")
                 continue
             group_id = group_ids[group]
             stats = GroupCoverage(query_taxon_id=group_id)
             coverage[group] = stats
             seen_in_group: set[int] = set()
+            query: dict[str, Any] = {
+                "place_id": place["id"], "taxon_id": group_id, "quality_grade": "research",
+                "photos": "true", "rank": "species", "per_page": 200,
+            }
+            if group == "Insecta":
+                # The named insect orders are their own groups. Leaving them out of this
+                # query keeps the API's 10,000-row limit for the remaining insects.
+                orders = [str(group_ids[order]) for order in ("Lepidoptera", "Odonata", "Hymenoptera") if order in group_ids]
+                if orders:
+                    query["without_taxon_id"] = ",".join(orders)
             for page in range(1, 51):
-                data = self.get(
-                    "observations/species_counts",
-                    {
-                        "place_id": place["id"],
-                        "taxon_id": group_id,
-                        "quality_grade": "research",
-                        "photos": "true",
-                        "rank": "species",
-                        "per_page": 200,
-                        "page": page,
-                    },
-                    refresh,
-                )
+                data = self.get("observations/species_counts", {**query, "page": page}, refresh)
                 rows = data["results"]
                 stats.api_total_species = data.get("total_results")
                 stats.scanned_species += len(rows)
@@ -196,7 +223,7 @@ class INaturalist:
                         stats.excluded_invalid_or_duplicate += 1
                         continue
                     stats.eligible_species += 1
-                    if stats.selected_species >= limit:
+                    if limit is not None and stats.selected_species >= limit:
                         stats.omitted_by_limit += 1
                         continue
                     taxa[t["id"]] = self.to_taxon(t, group, row["count"])
@@ -269,7 +296,7 @@ class INaturalist:
             names.add(t["name"])
             if not count:
                 warnings.append(
-                    f"{t['name']} was explicitly included; no matching Rajasthan research-photo "
+                    f"{t['name']} was explicitly included; no matching {place_name} research-photo "
                     "observations were returned. This is not evidence of local occurrence."
                 )
         if not taxa:
@@ -284,6 +311,8 @@ class INaturalist:
             version=version,
             refreshed_at=datetime.now(UTC).isoformat(),
             place_id=place["id"],
+            place_name=place_name,
+            coverage_basis=f"{place_name} research-grade photo observations; active species only",
             taxa=values,
             counts=dict(Counter(t.group for t in values)),
             limits=request.limits,
@@ -335,12 +364,11 @@ class TaxaService:
         self.error = None
         client = INaturalist(self.cache_dir)
         try:
+            current = self.read()
             if request.additional_taxon_ids is None:
-                request = request.model_copy(
-                    update={
-                        "additional_taxon_ids": self.read().additional_taxon_ids,
-                    }
-                )
+                request = request.model_copy(update={"additional_taxon_ids": current.additional_taxon_ids})
+            if request.place is None:
+                request = request.model_copy(update={"place": current.place_name or DEFAULT_PLACE})
             result = client.build(request, refresh=force)
             atomic_json(self.path, result.model_dump())
             return result

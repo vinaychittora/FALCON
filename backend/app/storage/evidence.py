@@ -7,6 +7,7 @@ import math
 import os
 import re
 import stat
+import wave
 from datetime import datetime, timedelta
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal
@@ -36,6 +37,24 @@ def safe_message(value: object) -> str | None:
     text = re.sub(r"(?:rtsps?|https?)://\S+", "[connection redacted]", str(value))
     text = re.sub(r"(?:[A-Za-z]:[\\/]|/)[^\s,;]+", "[path redacted]", text)
     return text[:1000]
+
+
+def _media_duration_ms(path: Path, media_kind: str) -> int | None:
+    try:
+        if media_kind == "audio":
+            with wave.open(str(path), "rb") as reader:
+                return round(reader.getnframes() / reader.getframerate() * 1000)
+        import av
+
+        with av.open(str(path)) as container:
+            if container.duration:
+                return round(container.duration / 1000)
+    except (EOFError, OSError, ValueError, ZeroDivisionError, wave.Error):
+        return None
+    except Exception:
+        # PyAV raises its own error types for damaged containers.
+        return None
+    return None
 
 
 class EvidenceStore:
@@ -77,7 +96,7 @@ class EvidenceStore:
         safe_settings = AnalysisSettings.model_validate(
             {key: value for key, value in values.items() if key in allowed}
         ).model_dump(mode="json", exclude_unset=True)
-        for key in ("evidence_mode", "evidence_seconds", "clock_basis", "deployment_mode"):
+        for key in ("evidence_mode", "evidence_seconds", "clock_basis", "deployment_mode", "clock_synchronized"):
             if key in values and isinstance(values[key], (str, int, float, bool)):
                 safe_settings[key] = values[key]
         if isinstance(values.get("sensor_id"), str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}", values["sensor_id"]):
@@ -208,19 +227,50 @@ class EvidenceStore:
             return self._recover_pending_locked()
 
     def _recover_pending_locked(self) -> int:
+        self._remove_interrupted_temporaries()
         with self.database.connection() as connection:
             connection.execute("BEGIN IMMEDIATE")
             rows = connection.execute("SELECT evidence_id,payload FROM evidence WHERE status='pending'").fetchall()
             for row in rows:
                 record = EvidenceRecord.model_validate_json(row["payload"])
-                record = record.model_copy(update={
+                record = self._recovered_file(record) or record.model_copy(update={
                     "status": "failed", "message": "Capture interrupted before completion; no verified clip is available.",
                 })
                 connection.execute(
-                    "UPDATE evidence SET status='failed',payload=? WHERE evidence_id=?",
-                    (record.model_dump_json(), record.evidence_id),
+                    "UPDATE evidence SET status=?,payload=? WHERE evidence_id=?",
+                    (record.status, record.model_dump_json(), record.evidence_id),
                 )
         return len(rows)
+
+    def _remove_interrupted_temporaries(self) -> None:
+        """Delete only this application's unfinished temporary files, never evidence."""
+        patterns = (".*.part.mp4", ".audio-*.wav", "falcon-evidence-*.zip")
+        for pattern in patterns:
+            for path in self.root.glob(pattern):
+                try:
+                    if path.is_file() and not path.is_symlink():
+                        path.unlink()
+                except OSError:
+                    pass
+
+    def _recovered_file(self, record: EvidenceRecord) -> EvidenceRecord | None:
+        """A clip is linked into place only after fsync; keep one whose record update was lost."""
+        suffix = ".mp4" if record.media_kind == "video" else ".wav"
+        try:
+            path = self.safe_path(f"{record.evidence_id}{suffix}")
+            size, digest = file_digest(path)
+        except (OSError, ValueError):
+            return None
+        duration = _media_duration_ms(path, record.media_kind) if size else None
+        if not duration:
+            return None
+        path.chmod(0o600)
+        return record.model_copy(update={
+            "status": "partial", "relative_path": path.name, "size_bytes": size, "sha256": digest,
+            "duration_ms": duration, "actual_start_ms": record.requested_start_ms,
+            "actual_end_ms": record.requested_start_ms + duration,
+            "message": "Recovered after an interruption. The clip finished writing; its start is approximated by the requested start.",
+        })
 
     def get(self, evidence_id: str) -> EvidenceRecord:
         with self.database.connection() as connection:

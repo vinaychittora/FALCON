@@ -7,7 +7,7 @@ import tempfile
 import threading
 import wave
 from collections import deque
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,10 +31,13 @@ class EncounterEvidence:
     def __init__(
         self, store: EvidenceStore, session_id: str, source_id: str,
         started_at: str, *, reserve_bytes: int = 256 * 1024**2,
+        clock: Callable[[int], datetime] | None = None,
     ):
         self.store = store
         self.session_id, self.source_id = session_id, source_id
         self.started_at = datetime.fromisoformat(started_at)
+        # Session offset -> wall clock; the live service corrects for suspends and clock steps.
+        self.clock = clock or (lambda offset: self.started_at + timedelta(milliseconds=offset))
         self.reserve_bytes = reserve_bytes
         def completed(identity: str, result: dict[str, Any]) -> None:
             store.complete(identity, result)
@@ -73,7 +76,7 @@ class EncounterEvidence:
         return self.store.create(
             source_id=self.source_id, session_id=self.session_id,
             media_kind=kind,
-            captured_at=(self.started_at + timedelta(milliseconds=start)).isoformat(),
+            captured_at=self.clock(start).isoformat(),
             requested_start_ms=start, requested_end_ms=end,
         )
 
@@ -98,12 +101,18 @@ class EncounterEvidence:
                     self.store.link(previous_id, event.event_id)
                     return
             start, end = max(0, event.timestamp_ms - 2000), event.timestamp_ms + 3000
+            # A lingering animal must not produce overlapping clips: continue from
+            # the end of the previous clip in this stream generation instead.
+            start = max([start, *(
+                previous_end for previous_generation, _, previous_end, _ in self._windows
+                if previous_generation == generation and previous_end <= event.timestamp_ms
+            )])
             record = self._create("video", start, end)
             evidence_id = record.evidence_id
             self.store.link(record.evidence_id, event.event_id)
             self._windows.append((generation, start, end, record.evidence_id))
             if self._pin:
-                self.recorder.request(self._pin, record.evidence_id)
+                self.recorder.request(self._pin, record.evidence_id, start_ms=start)
             else:
                 self.store.complete(record.evidence_id, {
                     "status": "failed",

@@ -4,3 +4,8 @@ Developed by Vinay Chittora.
 
 Pretrained model weights and third-party dependencies have separate licenses.
 See docs/model-licenses.md.
+
+Third-party files included in this repository:
+- node/audio/da7212-onboard-mic1.state: Waveshare DA7212 Audio HAT (B) mixer settings,
+  Copyright Waveshare, Apache License 2.0 (node/audio/LICENSE-waveshare.txt).
+The sensor-node installer downloads MediaMTX (MIT, Copyright bluenviron) at install time.

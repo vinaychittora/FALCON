@@ -1,0 +1,499 @@
+<title>FALCON Node Build Handbook</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Barlow+Semi+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a field manual. One readable column (~68ch) with figures allowed to run wider;
+   real step numbers only where order matters; wire colours carry meaning everywhere. */
+:root {
+  --paper: #f5f6f2; --surface: #eceee8; --ink: #1c2622; --muted: #56645d; --rule: #d3d9d2;
+  --accent: #2c6a4c; --caution: #b5531b; --caution-bg: #f7e9de;
+  --board: #cfe0d4; --board-line: #2c6a4c; --hat: #b9cfe0; --tray: #e3e6df; --shell: #c9cfc8;
+  --option: #efe3c8; --figure: #ffffff;
+  --w-red: #cf3b2c; --w-orange: #e07a1f; --w-yellow: #c99a00; --w-green: #2f8f4e; --w-blue: #2b67c6;
+  --w-black: #2a2f2c; --w-plate: #7a5c3e; --w-power: #b5531b; --w-lan: #6b4fa3; --w-ribbon: #6f7b75;
+  --font-display: "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "Atkinson Hyperlegible", "Segoe UI", Verdana, sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  --measure: 70ch;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #121815; --surface: #19211d; --ink: #e2e8e3; --muted: #9aa8a0; --rule: #2d3833;
+    --accent: #77c49b; --caution: #ee8d55; --caution-bg: #2f2218;
+    --board: #22382b; --board-line: #77c49b; --hat: #213244; --tray: #1f2622; --shell: #39433e;
+    --option: #3a3220; --figure: #ffffff;
+    --w-red: #ff6a5a; --w-orange: #ffa04d; --w-yellow: #f2c84b; --w-green: #5cc982; --w-blue: #6fa3ff;
+    --w-black: #c9cfcb; --w-plate: #c9a27c; --w-power: #ee8d55; --w-lan: #b39bea; --w-ribbon: #a7b2ac;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #121815; --surface: #19211d; --ink: #e2e8e3; --muted: #9aa8a0; --rule: #2d3833;
+  --accent: #77c49b; --caution: #ee8d55; --caution-bg: #2f2218;
+  --board: #22382b; --board-line: #77c49b; --hat: #213244; --tray: #1f2622; --shell: #39433e;
+  --option: #3a3220; --figure: #ffffff;
+  --w-red: #ff6a5a; --w-orange: #ffa04d; --w-yellow: #f2c84b; --w-green: #5cc982; --w-blue: #6fa3ff;
+  --w-black: #c9cfcb; --w-plate: #c9a27c; --w-power: #ee8d55; --w-lan: #b39bea; --w-ribbon: #a7b2ac;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--paper); color: var(--ink); font: 16.5px/1.6 var(--font-body); }
+.page { max-width: 1060px; margin: 0 auto; padding-block: 28px 80px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.prose { max-width: var(--measure); }
+h1, h2, h3 { font-family: var(--font-display); line-height: 1.12; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(2.2rem, 5vw, 3.4rem); font-weight: 700; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.15rem); font-weight: 700; padding-top: 12px; }
+h3 { font-size: 1.3rem; font-weight: 600; margin-top: 8px; }
+section { display: grid; gap: 18px; padding-block: 40px 8px; border-top: 1px solid var(--rule); }
+section:first-of-type { border-top: 0; }
+p, ul, ol { margin: 0; }
+ul, ol { padding-left: 1.3em; display: grid; gap: 6px; }
+a { color: var(--accent); }
+code, kbd, .mono { font-family: var(--font-mono); font-size: 0.88em; }
+.eyebrow { font: 600 0.8rem/1 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+header.top { display: grid; gap: 14px; padding-bottom: 26px; }
+header.top .lede { font-size: 1.15rem; color: var(--muted); max-width: 62ch; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 0.9rem; color: var(--muted); }
+.meta b { color: var(--ink); font-weight: 700; }
+nav.toc { background: var(--surface); border-radius: 8px; padding: 16px 20px; }
+nav.toc ol { columns: 2 240px; column-gap: 32px; display: block; padding-left: 1.4em; }
+nav.toc li { break-inside: avoid; padding-block: 2px; }
+.caution { background: var(--caution-bg); border-left: 4px solid var(--caution); padding: 12px 16px; border-radius: 0 6px 6px 0; max-width: var(--measure); }
+.caution strong { color: var(--caution); }
+.note { color: var(--muted); font-size: 0.95rem; }
+figure { margin: 0; display: grid; gap: 8px; }
+figcaption { color: var(--muted); font-size: 0.92rem; max-width: var(--measure); }
+.figwrap { overflow-x: auto; background: var(--surface); border-radius: 8px; padding: 14px; }
+.figwrap svg { display: block; width: 100%; height: auto; min-width: 560px; }
+.render { position: relative; background: var(--figure); border-radius: 8px; overflow: hidden; }
+.render img { display: block; width: 100%; height: auto; }
+.render svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.photo { background: var(--figure); border-radius: 8px; overflow: hidden; }
+.photo img { display: block; width: 100%; height: auto; }
+.two { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 22px; align-items: start; }
+.two > * { min-width: 0; }
+table { border-collapse: collapse; width: 100%; font-size: 0.95rem; }
+.tablewrap { overflow-x: auto; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 0.82rem/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+ol.steps { counter-reset: step; list-style: none; padding: 0; gap: 18px; max-width: var(--measure); }
+ol.steps > li { counter-increment: step; display: grid; grid-template-columns: 2.4rem 1fr; gap: 4px 12px; }
+ol.steps > li > * { grid-column: 2; min-width: 0; }
+ol.steps > li::before { content: counter(step); grid-column: 1; grid-row: 1 / span 8; font: 700 1.25rem/2.2rem var(--font-display);
+  width: 2.2rem; height: 2.2rem; text-align: center; border-radius: 50%; background: var(--accent); color: var(--paper); }
+ol.steps > li > strong { font-size: 1.05rem; }
+ol.steps ul { margin-top: 4px; }
+ol.steps pre { margin-top: 4px; }
+pre { background: var(--surface); border-radius: 6px; padding: 12px 14px; overflow-x: auto; margin: 0;
+  font: 0.86rem/1.55 var(--font-mono); max-width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 10px; border-radius: 999px; background: var(--surface); font-size: 0.9rem; }
+.chip i { width: 18px; height: 6px; border-radius: 3px; display: inline-block; }
+.files li code { word-break: break-all; }
+/* SVG styling through the page tokens */
+svg text { font-family: var(--font-body); fill: var(--ink); }
+svg .lbl { font-size: 4.3px; } svg .cap { font: 600 11px var(--font-display); letter-spacing: 0.08em; fill: var(--muted); }
+svg .note { font-size: 10.5px; fill: var(--muted); } svg .pl { font-size: 11px; } svg .pl.strong { font-weight: 700; }
+svg .pl.dim { fill: var(--muted); } svg .pn { font: 600 7.5px var(--font-mono); fill: var(--ink); }
+svg .tag { font: 700 11px var(--font-body); }
+.layout .shell { fill: var(--shell); } .layout .inside { fill: var(--paper); } .layout .tray { fill: var(--tray); stroke: var(--rule); stroke-width: 0.4; }
+.layout .board { fill: var(--board); stroke: var(--board-line); stroke-width: 0.45; }
+.layout .hat { fill: var(--hat); fill-opacity: 0.9; stroke: var(--w-blue); stroke-width: 0.45; }
+.layout .option { fill: var(--option); stroke: var(--muted); stroke-width: 0.45; stroke-dasharray: 2 1.2; }
+.layout .port, .layout .conn { fill: var(--surface); stroke: var(--muted); stroke-width: 0.35; }
+.layout .gland { fill: var(--muted); } .layout .lens { fill: var(--paper); stroke: var(--ink); stroke-width: 0.5; }
+.layout .mic { fill: none; stroke: var(--w-red); stroke-width: 0.6; stroke-dasharray: 0.9 0.6; }
+.layout .pin { fill: var(--muted); fill-opacity: 0.45; }
+.layout .leader { stroke: var(--ink); stroke-width: 0.3; } .layout .dot { fill: var(--ink); }
+.layout .cable { fill: none; stroke-width: 0.7; stroke-linejoin: round; }
+.layout .ribbon { stroke: var(--w-ribbon); stroke-width: 1.6; stroke-opacity: 0.8; }
+.layout .power { stroke: var(--w-power); stroke-width: 1; } .layout .lan { stroke: var(--w-lan); stroke-width: 1; }
+.layout .plate { stroke: var(--w-plate); }
+.layout .cable.w-red { stroke: var(--w-red); } .layout .cable.w-blue { stroke: var(--w-blue); }
+.layout .cable.w-yellow { stroke: var(--w-yellow); } .layout .cable.w-black { stroke: var(--w-black); }
+.layout .cable.w-green { stroke: var(--w-green); } .layout .cable.w-orange { stroke: var(--w-orange); }
+.layout circle.w-red { fill: var(--w-red); } .layout circle.w-blue { fill: var(--w-blue); } .layout circle.w-yellow { fill: var(--w-yellow); }
+.layout circle.w-black { fill: var(--w-black); } .layout circle.w-green { fill: var(--w-green); } .layout circle.w-orange { fill: var(--w-orange); }
+.gpio .hdr { fill: var(--paper); stroke: var(--rule); }
+.gpio .pin, .wiring .pin, .wiring .pinfaint { fill: var(--paper); stroke: var(--muted); stroke-width: 1; }
+.wiring .pinfaint { stroke-opacity: 0.5; }
+.gpio .pwr { fill: var(--caution-bg); stroke: var(--caution); stroke-width: 1.2; }
+.gpio .gndpin { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+.gpio .hatpin { fill: var(--hat); stroke: var(--muted); stroke-width: 1; }
+.gpio .w-red, .wiring .w-red { fill: var(--w-red); } .gpio .w-blue, .wiring .w-blue { fill: var(--w-blue); }
+.gpio .w-yellow, .wiring .w-yellow { fill: var(--w-yellow); } .gpio .w-black, .wiring .w-black { fill: var(--w-black); }
+.gpio .w-green, .wiring .w-green { fill: var(--w-green); } .gpio .w-orange, .wiring .w-orange { fill: var(--w-orange); }
+.gpio .w-black + .pn, .wiring .w-black + .pn, .gpio .w-blue + .pn, .wiring .w-blue + .pn, .gpio .w-red + .pn, .wiring .w-red + .pn,
+.gpio .w-green + .pn, .wiring .w-green + .pn { fill: var(--paper); }
+.gpio .w-yellow + .pn, .wiring .w-yellow + .pn, .gpio .w-orange + .pn, .wiring .w-orange + .pn { fill: #1c2622; }
+.gpio .t-red { fill: var(--w-red); } .gpio .t-blue { fill: var(--w-blue); } .gpio .t-yellow { fill: var(--w-yellow); }
+.gpio .t-black { fill: var(--ink); } .gpio .t-green { fill: var(--w-green); } .gpio .t-orange { fill: var(--w-orange); }
+.wiring .hatbox { fill: var(--hat); stroke: var(--w-blue); stroke-width: 1; }
+.wiring .board2 { fill: var(--board); stroke: var(--board-line); stroke-width: 1; }
+.wiring .plate { fill: var(--option); stroke: var(--w-plate); stroke-width: 1; } .wiring .comb { stroke: var(--w-plate); stroke-width: 1.4; }
+.wiring .pinsolid { fill: var(--ink); } .wiring .wall { stroke: var(--muted); stroke-width: 2; stroke-dasharray: 7 5; }
+.wiring .glandmark { fill: var(--muted); }
+.wiring .wire { fill: none; stroke-width: 2.6; stroke-linejoin: round; stroke-linecap: round; }
+.wiring .w-red-s { stroke: var(--w-red); } .wiring .w-blue-s { stroke: var(--w-blue); } .wiring .w-yellow-s { stroke: var(--w-yellow); }
+.wiring .w-black-s { stroke: var(--w-black); } .wiring .w-green-s { stroke: var(--w-green); } .wiring .w-orange-s { stroke: var(--w-orange); }
+.wiring .w-plate-s { stroke: var(--w-plate); }
+.flow .box { fill: var(--paper); stroke: var(--ink); stroke-width: 1.2; }
+.flow .zone { fill: var(--surface); stroke: var(--rule); stroke-width: 1.2; }
+.flow .opt { fill: var(--option); stroke: var(--muted); stroke-width: 1.2; stroke-dasharray: 5 3; }
+.flow .arrow { stroke: currentColor; stroke-width: 1.6; fill: none; }
+.flow .data { stroke: var(--accent); stroke-width: 2.2; fill: none; }
+.flow .pw { stroke: var(--w-power); stroke-width: 2.2; fill: none; }
+.flow .ln { stroke: var(--w-lan); stroke-width: 2.2; fill: none; }
+.flow .t { font-size: 13px; } .flow .ts { font-size: 11.5px; fill: var(--muted); } .flow .th { font: 700 13.5px var(--font-body); }
+.flow .ta { font-size: 11.5px; fill: var(--accent); font-weight: 700; } .flow .tp { font-size: 11.5px; fill: var(--w-power); font-weight: 700; }
+.flow .tl { font-size: 11.5px; fill: var(--w-lan); font-weight: 700; }
+.flow { color: var(--ink); }
+.render .odot { fill: #1c2622; stroke: #ffffff; stroke-width: 3; }
+.render .oleader { stroke: #1c2622; stroke-width: 2.5; }
+.render .olbl { font: 700 30px var(--font-body); fill: #1c2622; paint-order: stroke; stroke: #ffffff; stroke-width: 7px; }
+:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 560px) { body { font-size: 15.5px; } nav.toc ol { columns: 1; } }
+@media print {
+  @page { size: A4; margin: 14mm 13mm; }
+  body { font-size: 10.5pt; background: #fff; }
+  .page { max-width: none; padding: 0; }
+  section { break-before: page; padding-top: 0; border-top: 0; }
+  figure, .caution, table, pre, ol.steps > li { break-inside: avoid; }
+  .figwrap svg { min-width: 0; }
+  nav.toc { break-after: page; }
+  a { color: inherit; text-decoration: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; } }
+</style>
+
+<div class="page">
+<header class="top">
+  <span class="eyebrow">FALCON · Field Acoustic, Lens &amp; Climate Observation Node</span>
+  <h1>Node build handbook</h1>
+  <p class="lede">How to build the Raspberry Pi sensor node from the proof-of-concept parts: the printed enclosure, the wiring, the assembly, and the first power-on with the FALCON computer.</p>
+  <div class="meta"><span><b>Hardware set</b> PoC v6, parts as listed in hardware/PARTS.md</span><span><b>Box</b> {{BOX_SIZE}}</span><span><b>Date</b> 18 October 2026</span><span><b>Developer</b> Vinay Chittora</span></div>
+</header>
+
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#overview">What you are building</a></li>
+    <li><a href="#parts">Parts, tools and printed pieces</a></li>
+    <li><a href="#printer">Brief for the 3D printer</a></li>
+    <li><a href="#inside">What goes where inside the box</a></li>
+    <li><a href="#power">Power: two ways to feed the node</a></li>
+    <li><a href="#wiring">Wiring the sensors</a></li>
+    <li><a href="#assembly">Assembly, step by step</a></li>
+    <li><a href="#pi">Setting up the Raspberry Pi</a></li>
+    <li><a href="#falcon">Connecting the node to FALCON</a></li>
+    <li><a href="#tests">Checks before you close the box</a></li>
+    <li><a href="#limits">What this PoC hardware cannot do yet</a></li>
+    <li><a href="#files">Files</a></li>
+  </ol>
+</nav>
+
+<section id="overview">
+  <span class="eyebrow">1 · Overview</span>
+  <h2>What you are building</h2>
+  <div class="prose"><p>A weather-protected box that holds a Raspberry Pi with a camera and two microphones. A small radiation shield beside it carries the temperature, humidity and pressure sensor, and a rain plate sits on the roof. The Pi does no wildlife recognition itself. It offers the camera and microphone as one live stream, and the sensor readings, on the local network; the FALCON computer collects them, does the analysis, stores the records and controls the node.</p></div>
+  <figure>
+    {{OUTSIDE_FIGURE}}
+    <figcaption>The assembled node seen from the front right. All cables enter through glands in the bottom wall. A plate on the back clamps it to a pole.</figcaption>
+  </figure>
+  <figure>
+    <div class="figwrap">
+      <svg class="flow" viewBox="0 0 760 330" role="img" aria-label="Data flow: FALCON reads the camera and microphone stream from the Pi over RTSP, and asks the falcon-node service for its status, settings and queued weather readings with signed requests; you use FALCON in a browser.">
+        <defs><marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker>
+        <marker id="ahg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#2f8f4e"/></marker></defs>
+        <rect x="14" y="34" width="292" height="252" rx="10" class="zone"/>
+        <text x="28" y="56" class="th">Pi sensor node (outdoors)</text>
+        <rect x="30" y="72" width="118" height="44" rx="6" class="box"/><text x="89" y="99" text-anchor="middle" class="t">Camera Module 3</text>
+        <rect x="30" y="124" width="118" height="44" rx="6" class="box"/><text x="89" y="151" text-anchor="middle" class="t">Audio HAT mics</text>
+        <rect x="176" y="96" width="116" height="52" rx="6" class="box"/><text x="234" y="118" text-anchor="middle" class="t">Stream server</text><text x="234" y="136" text-anchor="middle" class="ts">RTSP :8554</text>
+        <line x1="148" y1="94" x2="176" y2="112" class="arrow" marker-end="url(#ah)"/><line x1="148" y1="146" x2="176" y2="132" class="arrow" marker-end="url(#ah)"/>
+        <rect x="30" y="196" width="118" height="70" rx="6" class="box"/><text x="89" y="222" text-anchor="middle" class="t">BME280</text><text x="89" y="240" text-anchor="middle" class="t">+ rain plate</text><text x="89" y="257" text-anchor="middle" class="ts">I²C · GPIO17</text>
+        <rect x="176" y="196" width="116" height="70" rx="6" class="box"/><text x="234" y="218" text-anchor="middle" class="t">falcon-node</text><text x="234" y="236" text-anchor="middle" class="ts">control :8780</text><text x="234" y="252" text-anchor="middle" class="ts">reading queue</text>
+        <line x1="148" y1="231" x2="176" y2="231" class="arrow" marker-end="url(#ah)"/>
+        <line x1="234" y1="196" x2="234" y2="148" class="arrow" marker-end="url(#ah)"/><text x="242" y="178" class="ts">runs it</text>
+        <rect x="454" y="34" width="292" height="252" rx="10" class="zone"/>
+        <text x="468" y="56" class="th">FALCON computer (indoors or beside it)</text>
+        <rect x="470" y="80" width="260" height="76" rx="6" class="box"/><text x="600" y="106" text-anchor="middle" class="t">FALCON  ·  127.0.0.1:8000</text><text x="600" y="126" text-anchor="middle" class="ts">live analysis, evidence clips,</text><text x="600" y="142" text-anchor="middle" class="ts">review, weather history, export</text>
+        <rect x="470" y="204" width="260" height="54" rx="6" class="box"/><text x="600" y="226" text-anchor="middle" class="t">Sensors page</text><text x="600" y="244" text-anchor="middle" class="ts">switches, camera settings, node health</text>
+        <line x1="600" y1="204" x2="600" y2="156" class="arrow" marker-end="url(#ah)"/>
+        <path d="M470 122 L292 122" class="data" marker-end="url(#ahg)"/>
+        <text x="381" y="110" text-anchor="middle" class="ta">video + audio stream</text><text x="381" y="140" text-anchor="middle" class="ts">FALCON reads it</text>
+        <path d="M470 231 L292 231" class="data" marker-end="url(#ahg)"/>
+        <text x="381" y="219" text-anchor="middle" class="ta">status, settings, readings</text><text x="381" y="249" text-anchor="middle" class="ts">signed with the pairing key</text>
+        <text x="380" y="304" text-anchor="middle" class="ts">Ethernet or Wi-Fi on the local network. No internet is needed for monitoring.</text>
+        <text x="380" y="322" text-anchor="middle" class="ts">You use FALCON in a browser on that computer, or through private Tailscale access.</text>
+      </svg>
+    </div>
+    <figcaption>Both connections start at the FALCON computer: it reads the live stream and asks the node for its status and weather readings. The node keeps readings until FALCON has collected them, so a network break loses nothing, and a stolen or tampered Pi cannot control FALCON.</figcaption>
+  </figure>
+</section>
+
+<section id="parts">
+  <span class="eyebrow">2 · Parts</span>
+  <h2>Parts, tools and printed pieces</h2>
+  <h3>Electronics you already have</h3>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Part</th><th>Job in the node</th></tr></thead>
+    <tbody>
+      <tr><td>Raspberry Pi 4 Model B, 1 GB</td><td>Runs the camera, microphones and sensors; streams to FALCON</td></tr>
+      <tr><td>Waveshare DA7212 Audio HAT (B)</td><td>Two microphones on the top face. Comes with a 2 × 20 header, M2.5 × 15 standoffs and two speakers (speakers not used)</td></tr>
+      <tr><td>Camera Module 3 (standard), 200 mm ribbon</td><td>The camera, 12 MP with autofocus</td></tr>
+      <tr><td>Kingston Canvas Select Plus 32 GB microSD</td><td>Operating system and node software</td></tr>
+      <tr><td>Heatsink set RS099</td><td>Cooling for the Pi's chips (fits under the HAT on 15 mm standoffs)</td></tr>
+      <tr><td>BME280 breakout, 3.3 V, soldered pins (ThinkRobotics)</td><td>Temperature, humidity and pressure</td></tr>
+      <tr><td>Rain plate + LM393 controller (REES52 AR609)</td><td>Wet / dry signal. Dew also makes it wet; it does not measure rainfall</td></tr>
+      <tr><td>Jumper wire set (REES52 LD997)</td><td>Sensor wiring</td></tr>
+      <tr><td>Official USB-C supply 5.1 V / 3 A</td><td>Power, option A</td></tr>
+      <tr><td>PoE+ injector and Waveshare 25 W PoE splitter (optional)</td><td>Power and network over one cable, option B</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Printed parts</h3>
+  <p class="prose">Ten parts, all printable without supports. The <a href="#printer">printer brief</a> below has the material and settings.</p>
+  <div class="tablewrap"><table>
+    <thead><tr><th>#</th><th>Part</th><th>Qty</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td class="num">01</td><td>Shell</td><td class="num">1</td><td>The box body: back wall, sides, cable glands and vents</td></tr>
+      <tr><td class="num">02</td><td>Front cover</td><td class="num">1</td><td>Camera window and the two microphone grilles</td></tr>
+      <tr><td class="num">03</td><td>Electronics tray</td><td class="num">1</td><td>Everything electronic mounts on it outside the box, then it screws in</td></tr>
+      <tr><td class="num">04</td><td>Roof hood</td><td class="num">1</td><td>Keeps rain off the cover and top vents</td></tr>
+      <tr><td class="num">05</td><td>Rain-plate cradle</td><td class="num">1</td><td>Holds the rain plate at 25° on the roof</td></tr>
+      <tr><td class="num">06–08</td><td>Shield cap, 4 plates, sensor carrier</td><td class="num">6</td><td>Shade and airflow for the BME280</td></tr>
+      <tr><td class="num">09</td><td>Shield arm</td><td class="num">1</td><td>Holds the shield away from the warm box</td></tr>
+      <tr><td class="num">10</td><td>Pole-mount plate</td><td class="num">1</td><td>Clamps the box to a pole with two hose clamps</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Small parts to buy</h3>
+  <ul class="prose">
+    <li>Brass heat-set inserts: 10 × M3 (about 5.7 mm long) and 4 × M2.5. These press into the plastic with a hot soldering iron and give strong threads.</li>
+    <li>Screws: 6 × M3 × 12 (cover), 4 × M3 × 8 (tray), 4 × M2.5 × 6 (Pi), 4 × M2 × 6 self-tapping (camera), 2 × M3 × 20, 4 × M3 × 12 and 1 × M3 × 10 with nuts (hood, cradle, shield), 3 × M3 threaded rod 70 mm with 6 nuts (shield stack), 4 × M4 × 12 with nuts (pole plate).</li>
+    <li>Cable glands: 2 × M20 and 2 × M12 (PG7).</li>
+    <li>A clear acrylic or glass disc, 28 mm across and 2 mm thick, for the camera window. Clear silicone to seal it.</li>
+    <li>About 70 cm of 3 × 3 mm closed-cell foam strip, for the cover seal.</li>
+    <li>Fine insect mesh and thin acoustic fabric (speaker-grille cloth works), for the vents and microphone grilles.</li>
+    <li>A 4-core cable about 50 cm long for the BME280, and two hose clamps for a 40–90 mm pole.</li>
+    <li>Heat-shrink tubing and a few small cable ties.</li>
+  </ul>
+  <h3>Tools</h3>
+  <p class="prose">Soldering iron (with a heat-set insert tip if you have one), solder, wire strippers, small screwdrivers, a multimeter, a 7 mm nut driver or pliers, and a computer with an SD card reader.</p>
+</section>
+
+<section id="printer">
+  <span class="eyebrow">3 · For the 3D printer</span>
+  <h2>Brief for the 3D printer</h2>
+  <div class="prose"><p>Send the person printing the parts the file <code>FALCON-node-print-pack.zip</code>. It contains one STL file per part (print these), matching STEP files (open these in any CAD program to change something), and an eight-page PDF of dimensioned drawings. The first page of that PDF repeats this brief.</p></div>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Setting</th><th>Value</th><th>Why</th></tr></thead>
+    <tbody>
+      <tr><td>Material</td><td>PETG at minimum; ASA is better outdoors</td><td>PLA softens around 55–60 °C, which a box in the Rajasthan sun easily reaches</td></tr>
+      <tr><td>Colour</td><td>White or light grey</td><td>Less heating in the sun</td></tr>
+      <tr><td>Layers and walls</td><td>0.2 mm layers, 4 walls, 5 top and 5 bottom layers</td><td>Watertight walls and strong screw bosses</td></tr>
+      <tr><td>Infill</td><td>30–40 % gyroid</td><td>Stiff enough; light enough</td></tr>
+      <tr><td>Supports</td><td>None</td><td>Every part has a flat side to print on (orientations are on drawing sheet 1)</td></tr>
+      <tr><td>Inserts</td><td>M3 holes are 4.2 mm, M2.5 holes are 3.6 mm</td><td>Standard sizes for brass heat-set inserts</td></tr>
+    </tbody>
+  </table></div>
+  <div class="caution"><strong>Before printing the cover:</strong> the microphone positions come from Waveshare's 3D model, because the exact coordinates are not published. Drawing sheet 4 explains a two-minute check once the HAT is on the tray. The tray, shell and other parts can be printed first, and the cover after that check.</div>
+  <figure>
+    <div class="photo"><img src="{{IMG_EXPLODED}}" alt="Exploded view of all printed parts"></div>
+    <figcaption>Exploded view: shell, tray with the boards (green, reference only), front cover, roof hood and cradle, pole-mount plate, and the radiation shield on its arm.</figcaption>
+  </figure>
+</section>
+
+<section id="inside">
+  <span class="eyebrow">4 · Layout</span>
+  <h2>What goes where inside the box</h2>
+  <div class="prose"><p>Everything electronic mounts on the printed tray while it is on your bench. The Raspberry Pi sits with its USB and Ethernet ports facing down toward the cable glands, and its components facing the front cover. Mounted that way, its 40-pin header runs down the right-hand side, so the audio HAT sits on the right and its microphones face the cover grilles.</p></div>
+  <figure>
+    <div class="figwrap">{{LAYOUT_SVG}}</div>
+    <figcaption>Front view with the cover off, drawn to scale from the CAD model. Dashed red circles mark the microphones; the coloured lines are the sensor wires (colours match the wiring section). Purple is Ethernet, orange is USB-C power, grey is the camera ribbon.</figcaption>
+  </figure>
+</section>
+
+<section id="power">
+  <span class="eyebrow">5 · Power</span>
+  <h2>Power: two ways to feed the node</h2>
+  <figure>
+    <div class="figwrap">
+      <svg class="flow" viewBox="0 0 760 300" role="img" aria-label="Option A: a wall socket feeds the official USB-C supply, whose cable enters the box to the Pi; network is Wi-Fi or a separate Ethernet cable. Option B: the router and a mains cord feed an indoor PoE injector; one outdoor Ethernet cable enters the box to the PoE splitter, which feeds the Pi's Ethernet and USB-C.">
+        <defs><marker id="ahp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#b5531b"/></marker>
+        <marker id="ahl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0 L10 5 L0 10 z" fill="#6b4fa3"/></marker></defs>
+        <text x="14" y="26" class="th">A · Bench or garden: USB-C supply</text>
+        <rect x="14" y="40" width="112" height="46" rx="6" class="box"/><text x="70" y="68" text-anchor="middle" class="t">Wall socket</text>
+        <rect x="170" y="40" width="150" height="46" rx="6" class="box"/><text x="245" y="60" text-anchor="middle" class="t">USB-C supply</text><text x="245" y="77" text-anchor="middle" class="ts">5.1 V, 3 A</text>
+        <rect x="560" y="34" width="186" height="80" rx="8" class="zone"/><text x="653" y="54" text-anchor="middle" class="ts">inside the node box</text>
+        <rect x="600" y="62" width="106" height="40" rx="6" class="box"/><text x="653" y="87" text-anchor="middle" class="t">Pi 4</text>
+        <path d="M126 63 L170 63" class="pw" marker-end="url(#ahp)"/>
+        <path d="M320 63 L600 76" class="pw" marker-end="url(#ahp)"/><text x="450" y="58" text-anchor="middle" class="tp">USB-C cable, M20 gland</text>
+        <path d="M380 112 L600 94" class="ln" marker-end="url(#ahl)" stroke-dasharray="6 4"/><text x="372" y="117" text-anchor="end" class="tl">Wi-Fi, or Ethernet</text><text x="372" y="132" text-anchor="end" class="ts">through the second gland</text>
+        <text x="14" y="176" class="th">B · Field: Power over Ethernet (optional parts)</text>
+        <rect x="14" y="190" width="112" height="46" rx="6" class="box"/><text x="70" y="212" text-anchor="middle" class="t">Router</text><text x="70" y="228" text-anchor="middle" class="ts">LAN port</text>
+        <rect x="14" y="246" width="112" height="40" rx="6" class="box"/><text x="70" y="271" text-anchor="middle" class="t">Mains (C13 cord)</text>
+        <rect x="170" y="206" width="150" height="62" rx="6" class="box"/><text x="245" y="230" text-anchor="middle" class="t">PoE+ injector</text><text x="245" y="248" text-anchor="middle" class="ts">indoors, dry</text>
+        <path d="M126 213 L170 225" class="ln" marker-end="url(#ahl)"/><path d="M126 266 L170 252" class="pw" marker-end="url(#ahp)"/>
+        <rect x="430" y="184" width="316" height="110" rx="8" class="zone"/><text x="588" y="202" text-anchor="middle" class="ts">inside the node box</text>
+        <rect x="446" y="212" width="112" height="60" rx="6" class="opt"/><text x="502" y="238" text-anchor="middle" class="t">PoE splitter</text><text x="502" y="255" text-anchor="middle" class="ts">25 W, 5 V out</text>
+        <rect x="620" y="212" width="106" height="60" rx="6" class="box"/><text x="673" y="246" text-anchor="middle" class="t">Pi 4</text>
+        <path d="M320 237 L446 241" class="ln" marker-end="url(#ahl)" stroke-width="3.4"/><text x="383" y="226" text-anchor="middle" class="tl">one outdoor</text><text x="383" y="260" text-anchor="middle" class="ts">Ethernet cable</text>
+        <path d="M558 228 L620 228" class="ln" marker-end="url(#ahl)"/><text x="589" y="222" text-anchor="middle" class="tl">LAN</text>
+        <path d="M558 258 L620 258" class="pw" marker-end="url(#ahp)"/><text x="589" y="276" text-anchor="middle" class="tp">USB-C</text>
+      </svg>
+    </div>
+    <figcaption>Option A needs a power cable into the box, plus an Ethernet cable unless you use Wi-Fi. Option B brings power and network through a single outdoor cable. The mains side stays indoors in both cases.</figcaption>
+  </figure>
+  <div class="caution"><strong>Mains safety:</strong> the USB-C supply and the PoE injector are indoor devices. Keep them, and every mains connection, inside a dry building. Only low-voltage cables go outdoors. Use a finished, earthed C13 cord for the injector; a rewireable plug is not a substitute.</div>
+</section>
+
+<section id="wiring">
+  <span class="eyebrow">6 · Wiring</span>
+  <h2>Wiring the sensors</h2>
+  <div class="prose"><p>Only seven wires are needed. The audio HAT already uses the I²S audio pins, a button pin, two LED pins and the HAT ID pins, so the sensors use pins it leaves free or can share. The BME280 shares the I²C bus with the audio chip: they have different addresses (the audio chip is <code>0x1A</code>, the BME280 is <code>0x76</code> or <code>0x77</code>), so both work at once. The rain controller's digital output goes to GPIO17.</p></div>
+  <figure>
+    <div class="figwrap">{{GPIO_SVG}}</div>
+    <figcaption>The 40-pin header as you see it from the front of the box: pin 1 at the top, odd pins in the left column. Blue pins are taken by the audio HAT; orange rings are power; coloured pins are the seven sensor wires.</figcaption>
+  </figure>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Pin</th><th>Signal</th><th>Goes to</th><th>Suggested colour</th></tr></thead>
+    <tbody>
+      <tr><td class="num">1</td><td>3.3 V</td><td>BME280 VCC (VIN)</td><td>red</td></tr>
+      <tr><td class="num">3</td><td>GPIO2, I²C SDA</td><td>BME280 SDA</td><td>blue</td></tr>
+      <tr><td class="num">5</td><td>GPIO3, I²C SCL</td><td>BME280 SCL</td><td>yellow</td></tr>
+      <tr><td class="num">6</td><td>Ground</td><td>BME280 GND</td><td>black</td></tr>
+      <tr><td class="num">17</td><td>3.3 V</td><td>Rain controller VCC</td><td>orange</td></tr>
+      <tr><td class="num">9</td><td>Ground</td><td>Rain controller GND</td><td>black</td></tr>
+      <tr><td class="num">11</td><td>GPIO17</td><td>Rain controller DO</td><td>green</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Reaching the pins with the HAT fitted</h3>
+  <div class="prose"><p>The HAT's socket faces down onto the Pi, so it covers every pin and nothing sticks out on top for a jumper. Each socket leg does come through the HAT, though, as a small solder joint on its top face, in exactly the same layout as the pins below. Solder the seven wires to those joints.</p></div>
+  <ol class="steps">
+    <li><strong>Find pin 1 on the HAT.</strong><span>Hold the HAT the way it sits on the Pi in the box (header on the right, as in the layout figure). Pin 1 is the top joint of the left column. Check with the multimeter: pin 1 to pin 6 reads 3.3 V when the Pi is powered.</span></li>
+    <li><strong>Cut and tin seven 15 cm wires.</strong><span>Cut female jumper leads in the suggested colours, keeping the female end. Strip 2 mm at the cut end and tin it.</span></li>
+    <li><strong>Solder each wire to its joint.</strong><span>Touch the tinned wire to the joint with a hot, clean iron for one or two seconds. Do not bridge to the neighbouring joint; check with the multimeter's continuity beeper.</span></li>
+    <li><strong>Label and secure the wires.</strong><span>Label both ends (a strip of tape and a pen is enough), then run the bundle along the HAT's right edge and fix it to the tray with a tie so a pull cannot rip a joint.</span></li>
+  </ol>
+  <figure>
+    <div class="figwrap">{{WIRING_SVG}}</div>
+    <figcaption>The complete sensor wiring. The BME280 and the rain plate live outside; their cables enter through the two M12 glands. CSB and SDO on the BME280 and AO on the rain controller stay unconnected.</figcaption>
+  </figure>
+  <h3>BME280</h3>
+  <ul class="prose">
+    <li>Power it from 3.3 V only (pin 1). This 3.3 V board has no voltage regulator, so 5 V would damage it.</li>
+    <li>Connect four wires: VCC (or VIN), GND, SCL, SDA. Leave CSB and SDO unconnected at first.</li>
+    <li>After power-on, <code>i2cdetect -y 1</code> should show <code>76</code> or <code>77</code>. If it shows neither, tie CSB to 3.3 V (this selects I²C) and SDO to GND (this fixes the address at <code>0x76</code>).</li>
+    <li>Use the 4-core cable between the shield and the box, with the jumper leads' female ends on the sensor pins. Seal each joint with heat-shrink.</li>
+  </ul>
+  <h3>Rain plate and controller</h3>
+  <ul class="prose">
+    <li>The plate has two pins; connect them to the controller's two plate pins with the supplied leads (either way round). The plate sits on the roof, while the controller stays dry inside the box.</li>
+    <li>Power the controller from 3.3 V (pin 17), never 5 V: at 3.3 V its DO output can never exceed what the Pi's GPIO accepts. The seller's listing contradicts itself (3.3–5 V in the text, 5 V in the table), so check with the multimeter that DO reads close to 3.3 V dry and close to 0 V wet before connecting it to pin 11.</li>
+    <li>Most of these boards pull DO low when wet, and their small LED lights up. If yours is the other way round, set <code>FALCON_RAIN_WET_WHEN_LOW=false</code> on the Pi.</li>
+    <li>Turn the blue sensitivity screw so the LED stays off when dry and switches on with a few drops of water.</li>
+  </ul>
+  <h3>Camera ribbon and audio HAT</h3>
+  <ul class="prose">
+    <li>The camera ribbon goes into the Pi socket marked CAMERA (between the micro-HDMI ports and the audio jack). Lift the socket's latch, insert the ribbon with its metal contacts facing the micro-HDMI ports, and press the latch down. The ribbon comes already connected to the camera; leave that end as it is.</li>
+    <li>The HAT stacks on the Pi with the supplied M2.5 × 15 standoffs. If the supplied 2 × 20 header is an extension (socket on the bottom, pins on top), it goes between the Pi and the HAT to bridge the gap. Leave the two speakers unconnected.</li>
+    <li>Fit the heatsinks before the HAT.</li>
+  </ul>
+</section>
+
+<section id="assembly">
+  <span class="eyebrow">7 · Assembly</span>
+  <h2>Assembly, step by step</h2>
+  <p class="prose">The order matters in two places. The roof-hood and shield-arm bolts have nuts inside the box, so fit them before the tray goes in. And test everything on the bench before closing anything.</p>
+  <ol class="steps">
+    <li><strong>Check the prints and set the inserts.</strong><span>Press the M3 inserts into the six cover holes in the shell rim and the four tray bosses on its back wall; press the M2.5 inserts into the four Pi bosses on the tray. Use the iron at about 220 °C and push them in straight until they sit flush.</span></li>
+    <li><strong>Test the electronics loose on the bench.</strong><span>Set up the Pi (section 8) with the camera, HAT and sensors connected by loose leads, and go through the checks in section 10. Fix problems now, while everything is reachable.</span></li>
+    <li><strong>Build the tray.</strong><span>Fit the heatsinks, screw the Pi to its four bosses (ports toward the tray's bottom edge), add the four 15 mm standoffs and the HAT, and solder the seven sensor wires. Screw the camera to the tower with four M2 screws, lens facing out, and connect the ribbon. Tie the PoE splitter (if used) into its bay and the rain controller into its frame.</span></li>
+    <li><strong>Prepare the shell.</strong><span>Glue insect mesh inside the bottom and top vent slots. Fit the four cable glands in the bottom wall. Bolt the shield arm to the right-hand side wall and the roof hood to the top (nuts inside, both now, while the box is empty).</span></li>
+    <li><strong>Prepare the cover.</strong><span>Bed the clear disc into the recess behind the camera window with a thin ring of clear silicone, and glue acoustic fabric over the two microphone grilles on the inside. Stick the foam strip around the shell rim, just inside the screw holes.</span></li>
+    <li><strong>Feed the cables in.</strong><span>Push each cable through its gland before connecting it: the Ethernet or PoE cable through the left M20 gland, the USB-C cable through the second M20 (option A only), the BME280 cable through the third gland and the rain-plate wires through the fourth. Leave a drip loop below each gland so water drips off instead of running in.</span></li>
+    <li><strong>Install the tray.</strong><span>Connect the cables, then screw the tray to the shell's back-wall inserts with four M3 × 8 screws. Tighten the gland nuts until the seals grip the cables.</span></li>
+    <li><strong>Close the cover.</strong><span>Check that no wire lies across the rim, then fit the cover with six M3 × 12 screws. Tighten them evenly in a cross pattern so the foam compresses all round.</span></li>
+    <li><strong>Fit the rain plate and the shield.</strong><span>Bolt the cradle to the hood and lay the plate in its pocket, pins at the high end. Build the shield stack on the three threaded rods, with the BME280 tied to the carrier strip in the middle, then bolt the cap's tab under the arm.</span></li>
+    <li><strong>Mount the node.</strong><span>Bolt the pole-mount plate to the back with four M4 bolts and clamp it to the pole with two hose clamps, camera facing the area to watch. For a wall, skip the plate and screw the shell directly through its four back holes with rubber washers.</span></li>
+  </ol>
+</section>
+
+<section id="pi">
+  <span class="eyebrow">8 · Software on the node</span>
+  <h2>Setting up the Raspberry Pi</h2>
+  <div class="prose"><p>The node software is in the FALCON source, in its <code>node</code> folder. It installs itself: you prepare the SD card on your computer, put it in the Pi and switch on. Internet is needed once, for the installation.</p></div>
+  <ol class="steps">
+    <li><strong>Write the SD card.</strong><span>With Raspberry Pi Imager choose Raspberry Pi OS Lite (64-bit). In its settings set the hostname to <code>falcon-node</code>, choose a user and password, add your Wi-Fi network if you will not use Ethernet, and turn on SSH.</span></li>
+    <li><strong>Put the FALCON node software on the card.</strong><span>Leave the card in your computer. A drive called <b>bootfs</b> appears. In the FALCON folder run the line below (on Windows use the card's drive letter, for example <code>E:</code>). It copies the software, creates the node's settings and prints a <b>pairing key</b>. Write it down; it is also saved on the card in <code>falcon-node/PAIRING.txt</code>.</span>
+<pre>python3 node/sdcard/prepare_sdcard.py \
+    /media/$USER/bootfs --name "Backyard node"</pre></li>
+    <li><strong>Start the node.</strong><span>Fit the audio HAT and connect the camera and sensors <i>before</i> switching on (the HAT is only recognized at power-on). Put the card in the Pi and switch on with internet available. The node installs its software (about 10 minutes), restarts once and starts streaming. The installation log is written to <code>falcon-node/install.log</code> on the card.</span></li>
+    <li><strong>Without the card tool.</strong><span>On a Pi that is already running, copy the <code>node</code> folder onto it and run one command. It prints the address and the pairing key when it finishes; run it again at any time to update.</span>
+<pre>sudo bash node/install.sh</pre></li>
+    <li><strong>Check what the node found.</strong><span>Open <code>http://falcon-node.local:8780</code> in a browser on the same network: the status page lists the camera, microphone, weather sensor and rain plate. On the Pi itself:</span>
+<pre>systemctl status falcon-node          # running?
+rpicam-hello --list-cameras           # imx708 listed
+arecord -l                            # audio HAT listed as card Zero
+i2cdetect -y 1                        # 1a (audio codec) and 76 or 77 (BME280)
+pinctrl get 17                        # rain: hi when dry, lo when wet</pre></li>
+  </ol>
+</section>
+
+<section id="falcon">
+  <span class="eyebrow">9 · Connecting to FALCON</span>
+  <h2>Connecting the node to FALCON</h2>
+  <ol class="steps">
+    <li><strong>Pair the node.</strong><span>On the FALCON computer open <b>Sensors → Add sensor node</b>. Enter <code>falcon-node.local</code> (or the Pi's IP address) and the pairing key. FALCON shows the node with its camera, microphone and sensors and starts collecting weather readings.</span></li>
+    <li><strong>Watch it.</strong><span>Open <b>Live</b>, choose the node and press <b>Start observing</b>. Detections appear on the right; confirm or correct them with one click.</span></li>
+    <li><strong>Fix the focus.</strong><span>The node watches one fixed scene, so autofocus would only hunt on moving leaves. In <b>Sensors → Camera picture settings</b> set Focus to "Fixed distance" and move the slider while watching Live (0.5 is about 2 m, 0 is infinity). Brightness, white balance, HDR and flip are set there too.</span></li>
+    <li><strong>Start by itself.</strong><span>In <b>Sensors → Start automatically</b> switch it on and choose the node, so FALCON resumes observing after a power cut. The node itself always starts streaming on its own.</span></li>
+    <li><strong>Add domestic animals to the species list.</strong><span>Cattle, goats, camels and dogs will appear on camera, but research-grade wildlife lists leave them out, so FALCON would label a cow as the nearest wild species. Add them once: <code>make taxa ARGS=--include-domestic</code>.</span></li>
+  </ol>
+  <p class="note prose">FALCON always connects to the node, never the other way round. So it works when FALCON runs under WSL on Windows or behind a firewall, and the node needs no keys or addresses of the FALCON computer. The pairing key never travels over the network: FALCON signs its requests with it.</p>
+</section>
+
+<section id="tests">
+  <span class="eyebrow">10 · Checks</span>
+  <h2>Checks before you close the box</h2>
+  <div class="tablewrap"><table>
+    <thead><tr><th>Check</th><th>How</th><th>Good result</th></tr></thead>
+    <tbody>
+      <tr><td>Camera</td><td>FALCON → Live</td><td>A sharp live picture of the scene</td></tr>
+      <tr><td>Microphones</td><td>Clap near the box; Live shows the sound status</td><td>"listening"; Sensors shows Microphone working</td></tr>
+      <tr><td>BME280</td><td>Sensors → Weather readings</td><td>A new reading every 30 s with believable values</td></tr>
+      <tr><td>Rain plate</td><td>Wet the plate with a few drops</td><td>Sensors shows "Wet" within 30 s; "Dry" after wiping it. "Not connected" means a loose DO wire</td></tr>
+      <tr><td>Link loss</td><td>Unplug the network for 2 minutes, then reconnect</td><td>The stream recovers by itself and the queued readings arrive</td></tr>
+      <tr><td>Power cut</td><td>Switch the supply off and on</td><td>Stream and sensors return without anyone logging in; no power warning on Sensors</td></tr>
+      <tr><td>Heat</td><td>Sensors → Health after an hour in the closed box</td><td>Processor temperature below 75 °C</td></tr>
+      <tr><td>Water</td><td>Spray the closed box from above and the sides</td><td>Dry inside, especially around the glands and the window</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="limits">
+  <span class="eyebrow">11 · Limits</span>
+  <h2>What this PoC hardware cannot do yet</h2>
+  <p class="prose">These are known gaps of the current parts, to be fixed when the hardware is upgraded. None of them stops the proof of concept.</p>
+  <ul class="prose">
+    <li><b>No night vision.</b> Camera Module 3 Standard blocks infrared and there is no IR lamp, so nights are dark, when much mammal activity happens. The NoIR version and an 850 nm illuminator fix this later.</li>
+    <li><b>Muffled microphones.</b> The HAT's microphones sit behind the cover grille; an external microphone with a windscreen will hear far better.</li>
+    <li><b>Humidity in dew.</b> The BME280 reads poorly once it is wet with dew; a sensor with a built-in heater (such as the SHT45) is a cheap upgrade.</li>
+    <li><b>Rain is only wet or dry.</b> The plate cannot measure rainfall, stays wet with dew, and corrodes over time. A tipping-bucket gauge measures millimetres.</li>
+    <li><b>The SD card can corrupt on a power cut.</b> A read-only root filesystem, or booting from a USB SSD, prevents this.</li>
+    <li><b>No clock of its own.</b> The Pi 4 has no battery clock. Without internet it takes the time from FALCON as soon as FALCON connects, and corrects the readings it took before that.</li>
+  </ul>
+</section>
+
+<section id="files">
+  <span class="eyebrow">12 · Files</span>
+  <h2>Files</h2>
+  <ul class="files prose">
+    <li><code>hardware/FALCON-node-print-pack.zip</code>: everything the 3D printer needs (STL, STEP, drawings PDF, short README).</li>
+    <li><code>hardware/drawings/FALCON-enclosure-drawings.pdf</code>: eight dimensioned sheets.</li>
+    <li><code>hardware/cad/stl/</code> and <code>hardware/cad/step/</code>: one file per part; <code>00_assembly_with_reference_boards.step</code> shows everything in place.</li>
+    <li><code>hardware/cad/falcon_node_enclosure.py</code>: the parametric model (CadQuery). Change a named size at the top, re-run it, and every file updates. <code>make_drawings.py</code> rebuilds the drawings and renders.</li>
+    <li><code>node/</code>: the node software, its installer and the SD-card tool. Guide: <code>docs/SENSOR_NODE.md</code>.</li>
+  </section>
+</div>

@@ -51,6 +51,7 @@ private/
 *.png
 !frontend/public/icons/falcon-192.png
 !frontend/public/icons/falcon-512.png
+!hardware/**/*.png
 *.ckpt
 *.pt
 *.pth
@@ -59,3 +60,10 @@ private/
 docs/*validation*
 docs/*benchmark*
 docs/environment-audit.md
+docs/development/environment-audit.md
+hardware/handbook/artifact.html
+
+# Receipts from the old export workflow; not part of the repository.
+PUBLIC_RELEASE_MANIFEST.json
+# Third-party drawings are kept locally only.
+hardware/manufacturer-references/

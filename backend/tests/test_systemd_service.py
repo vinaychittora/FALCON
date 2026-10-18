@@ -42,6 +42,7 @@ def test_unit_supervises_foreground_server_and_restarts_without_secrets(tmp_path
     assert '\\"mark\\"' in unit
     assert "password" not in unit.lower()
     assert "Type=exec" in unit
+    assert "WatchdogSec=600" in unit and "NotifyAccess=main" in unit
     with pytest.raises(SystemExit, match="control characters"):
         service.render(tmp_path / "bad\npath")
 

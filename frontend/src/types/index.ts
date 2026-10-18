@@ -38,8 +38,15 @@ export interface ModelEvidence {
   top_k: Candidate[];
   unknown_reason: string | null;
 }
+export type ReviewStatus =
+  | "unreviewed"
+  | "correct"
+  | "false_positive"
+  | "corrected"
+  | "unknown"
+  | "discarded";
 export interface Review {
-  status: "unreviewed" | "correct" | "false_positive" | "corrected" | "unknown";
+  status: ReviewStatus;
   corrected_taxon_id: number | null;
   corrected_scientific_name: string | null;
   corrected_common_name?: string | null;
@@ -54,6 +61,7 @@ export interface EnvironmentReading {
   temperature_c: number | null;
   humidity_percent: number | null;
   pressure_hpa: number | null;
+  surface_wet?: boolean | null;
 }
 interface BaseEvent {
   captured_at?: string | null;

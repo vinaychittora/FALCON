@@ -37,6 +37,12 @@ BINARY_ASSET_PATHS = {
     "frontend/public/icons/falcon-192.png",
     "frontend/public/icons/falcon-512.png",
 }
+# Hardware files and generated handbooks may be published when their exact hash is
+# listed in the asset manifest. Signatures stop a renamed photo or archive slipping in.
+REVIEWED_ASSET_ROOTS = ("hardware/", "docs/handbooks/")
+REVIEWED_ASSET_SIGNATURES: dict[str, bytes | None] = {
+    ".png": b"\x89PNG\r\n\x1a\n", ".pdf": b"%PDF-", ".zip": b"PK\x03\x04", ".stl": None,
+}
 PERSONAL_PATH = re.compile(
     r"(?i)(?:(?<![a-z0-9])[a-z]:[\\/]+(?:users[\\/]+[^/\\\s]+|[^/\\\s]+[\\/])"
     r"|/home/(?!user(?:[/\s]|$)|example(?:[/\s]|$))[a-z0-9_.-]+/|/mnt/[a-z]/)"
@@ -98,8 +104,10 @@ def forbidden_path(path: str) -> bool:
     name = relative.name.lower()
     if name.startswith(".env") and path != ".env.example":
         return True
-    if relative.suffix.lower() in FORBIDDEN_SUFFIXES:
+    if relative.suffix.lower() in FORBIDDEN_SUFFIXES and not reviewed_asset_path(path):
         return True
+    if parts[0] == "hardware" and len(parts) > 1 and parts[1] == "manufacturer-references":
+        return True  # Third-party drawings stay local; link to the makers instead.
     if parts[0] == "models" and path != "models/README.md":
         return True
     if parts[0] == "docs" and (
@@ -110,12 +118,16 @@ def forbidden_path(path: str) -> bool:
     return False
 
 
-def scan_content(path: str, data: bytes) -> list[Finding]:
+def reviewed_asset_path(path: str) -> bool:
+    return path.startswith(REVIEWED_ASSET_ROOTS) and PurePosixPath(path).suffix.lower() in REVIEWED_ASSET_SIGNATURES
+
+
+def scan_content(path: str, data: bytes, approved: frozenset[str] = frozenset()) -> list[Finding]:
     """Conservative heuristic check; manual review is still required before publishing."""
+    if path in BINARY_ASSET_PATHS or path in approved:
+        return []  # Exact content hashes are checked separately, never arbitrary binaries.
     if len(data) > MAX_SOURCE_BYTES:
         return [Finding(path, "oversized_source")]
-    if path in BINARY_ASSET_PATHS:
-        return []  # Exact content hashes are checked separately, never arbitrary PNGs.
     try:
         content = data.decode("utf-8")
     except UnicodeDecodeError:
@@ -203,19 +215,24 @@ def release_files(root: Path) -> list[str]:
 
 def inspect_release(root: Path) -> tuple[dict[str, bytes], list[Finding]]:
     payloads = {path: read_regular(root, path) for path in release_files(root)}
-    findings = [finding for path, data in payloads.items() for finding in scan_content(path, data)]
+    findings: list[Finding] = []
     try:
         assets = json.loads(payloads[ASSETS])
-        if not isinstance(assets, dict) or set(assets) != BINARY_ASSET_PATHS:
+        if not isinstance(assets, dict) or not BINARY_ASSET_PATHS <= set(assets):
             raise ValueError
         for path, expected_hash in assets.items():
-            if path not in payloads or not re.fullmatch(r"[a-f0-9]{64}", expected_hash):
+            if path not in payloads or not re.fullmatch(r"[a-f0-9]{64}", str(expected_hash)):
+                raise ValueError
+            if path not in BINARY_ASSET_PATHS and not reviewed_asset_path(path):
                 raise ValueError
             data = payloads[path]
-            if not data.startswith(b"\x89PNG\r\n\x1a\n") or hashlib.sha256(data).hexdigest() != expected_hash:
+            signature = REVIEWED_ASSET_SIGNATURES.get(PurePosixPath(path).suffix.lower(), b"\x89PNG\r\n\x1a\n")
+            if (signature and not data.startswith(signature)) or hashlib.sha256(data).hexdigest() != expected_hash:
                 findings.append(Finding(path, "unreviewed_binary_asset"))
     except (TypeError, ValueError):
         raise ReleaseError("Reviewed asset hash manifest is invalid") from None
+    approved = frozenset(assets)
+    findings += [finding for path, data in payloads.items() for finding in scan_content(path, data, approved)]
     return payloads, sorted(set(findings))
 
 

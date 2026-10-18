@@ -3,6 +3,7 @@ import io
 import os
 import tempfile
 import time
+import wave
 from collections.abc import Callable
 from pathlib import Path
 from threading import Event
@@ -80,11 +81,32 @@ def parse_results(
     return result
 
 
+def analysis_input(
+    source: Path, converted: Path, cancel: Event, max_seconds: float | None = None,
+) -> Path:
+    """Use 48 kHz mono 16-bit PCM directly; convert anything else with FFmpeg."""
+    if source.suffix.lower() == ".wav" and max_seconds is None:
+        try:
+            with wave.open(str(source), "rb") as reader:
+                if (
+                    reader.getnchannels(), reader.getsampwidth(), reader.getframerate(),
+                    reader.getcomptype(),
+                ) == (1, 2, 48000, "NONE"):
+                    return source
+        except (EOFError, OSError, wave.Error):
+            pass
+    extract_audio(source, converted, cancel, max_seconds)
+    return converted
+
+
 class BirdNET:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.executable = ROOT / ".birdnet-venv" / "bin" / "birdnet-analyze"
         self.python = ROOT / ".birdnet-venv" / "bin" / "python"
+        # The label file is fixed for the installed model; live audio calls analyze()
+        # every nine seconds and must not start a preparation process each time.
+        self._labels: list[str] | None = None
         self.env = {
             **os.environ,
             "CUDA_VISIBLE_DEVICES": "-1",
@@ -112,32 +134,33 @@ class BirdNET:
         ) as folder:
             temporary = Path(folder)
             log = temporary / "process.log"
-            message("Preparing BirdNET GLOBAL 6K V2.4 (CPU); model download is 224 MB on first use")
-            run_cancellable(
-                [
-                    str(self.python),
-                    str(ROOT / "scripts" / "birdnet_prepare.py"),
-                    str(temporary / "labels.txt"),
-                ],
-                log,
-                cancel,
-                self.env,
-                timeout=600,
-            )
-            labels = (temporary / "labels.txt").read_text().splitlines()
+            if self._labels is None:
+                message("Preparing BirdNET GLOBAL 6K V2.4 (CPU); model download is 224 MB on first use")
+                run_cancellable(
+                    [
+                        str(self.python),
+                        str(ROOT / "scripts" / "birdnet_prepare.py"),
+                        str(temporary / "labels.txt"),
+                    ],
+                    log,
+                    cancel,
+                    self.env,
+                    timeout=600,
+                )
+                self._labels = (temporary / "labels.txt").read_text().splitlines()
+            labels = self._labels
             names = {t.scientific_name.casefold() for t in taxa.taxa if t.group == "Aves"}
             matched = [label for label in labels if label.split("_", 1)[0].casefold() in names]
             if not matched:
                 raise ValueError(
-                    "No Rajasthan bird scientific names match the BirdNET model labels"
+                    "No local bird scientific names match the BirdNET model labels"
                 )
             species_list = temporary / "species_list.txt"
             species_list.write_text("\n".join(matched) + "\n")
             message(
-                f"BirdNET matched {len(matched)} of {len(names)} Rajasthan birds by scientific name"
+                f"BirdNET matched {len(matched)} of {len(names)} local birds by scientific name"
             )
-            wav = temporary / "audio.wav"
-            extract_audio(source, wav, cancel, config.max_seconds)
+            wav = analysis_input(source, temporary / "audio.wav", cancel, config.max_seconds)
             command = [
                 str(self.executable),
                 str(wav),
@@ -162,11 +185,11 @@ class BirdNET:
                     str(birdnet_week(config)),
                 ]
                 message(
-                    "Using configured local location/date filtering; retaining Rajasthan birds only"
+                    "Using configured local location/date filtering; retaining local birds only"
                 )
             else:
                 command += ["--slist", str(species_list)]
-                message("No site coordinates configured; using the matched Rajasthan bird list")
+                message("No site coordinates configured; using the matched local bird list")
             tick = time.perf_counter()
             peak = run_cancellable(
                 command, log, cancel, self.env, timeout=max(600, video.duration_ms / 1000 * 30)
@@ -178,7 +201,8 @@ class BirdNET:
                     "BirdNET did not create its expected CSV output: " + log.read_text()[-2000:]
                 )
             detections = parse_results(files[0], video, job_id, taxa, config)
-            if self.settings.debug_audio:
+            # Never move a caller's original WAV; only a temporary conversion is retained.
+            if self.settings.debug_audio and wav != source:
                 debug = self.settings.data_dir / "temp" / f"debug-audio-{job_id}.wav"
                 wav.replace(debug)
                 message("DEBUG_AUDIO is enabled; temporary WAV retained in data/temp")

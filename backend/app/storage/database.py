@@ -68,6 +68,12 @@ class Database:
                 PRAGMA user_version=1;
                 """
             )
+            # Incremental mirror checks keep their byte offsets in a separate table, so a
+            # database used by this version still works with older FALCON code.
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS legacy_import_offsets ("
+                "path TEXT PRIMARY KEY, imported_bytes INTEGER NOT NULL)"
+            )
 
     @contextmanager
     def connection(self) -> Iterator[sqlite3.Connection]:

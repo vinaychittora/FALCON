@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
+import { wetness } from "../api/environment";
 import { captureTime } from "../api/observations";
 import Icon from "./Icon";
 import "./sensor-history.css";
@@ -12,6 +13,7 @@ export interface Reading {
   temperature_c: number | null;
   humidity_percent: number | null;
   pressure_hpa: number | null;
+  surface_wet?: boolean | null;
   quality: "valid" | "suspect" | "invalid";
   quality_note: string | null;
 }
@@ -155,6 +157,9 @@ export function SensorHistoryView({
                   <th>
                     <Icon name="wind" size={15} /> Pressure · hPa
                   </th>
+                  <th title="Rain or dew on the plate; not a rainfall amount">
+                    <Icon name="rain" size={15} /> Rain plate
+                  </th>
                   <th>Quality</th>
                 </tr>
               </thead>
@@ -177,6 +182,7 @@ export function SensorHistoryView({
                       <td>{measurement(reading.temperature_c)}</td>
                       <td>{measurement(reading.humidity_percent)}</td>
                       <td>{measurement(reading.pressure_hpa)}</td>
+                      <td>{wetness(reading.surface_wet)}</td>
                       <td title={reading.quality_note ?? undefined}>
                         {reading.quality}
                       </td>

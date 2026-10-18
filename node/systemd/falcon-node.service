@@ -1,0 +1,27 @@
+[Unit]
+Description=FALCON sensor node (camera, microphone and weather sensors)
+Documentation=file:/opt/falcon-node/README.md
+Wants=network-online.target
+After=network-online.target sound.target time-sync.target
+
+[Service]
+Type=simple
+User=falcon-node
+Group=falcon-node
+WorkingDirectory=/opt/falcon-node
+Environment=PYTHONPATH=/opt/falcon-node PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m falcon_node run --config /etc/falcon-node/node.conf
+Restart=always
+RestartSec=5
+# Lets the node take the time from the FALCON inference node when it has no internet.
+AmbientCapabilities=CAP_SYS_TIME
+CapabilityBoundingSet=CAP_SYS_TIME
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+StateDirectory=falcon-node
+StateDirectoryMode=0700
+
+[Install]
+WantedBy=multi-user.target

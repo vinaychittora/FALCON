@@ -14,6 +14,19 @@ def iou(a: BBox, b: BBox) -> float:
     return intersection / union if union else 0
 
 
+def overlaps_excluded(box: BBox, excluded: BBox, iou_threshold: float = 0.3, contained: float = 0.6) -> bool:
+    """True when a motion blob is substantially part of a person/vehicle box.
+
+    Background subtraction often reports only legs, a torso or a shadow-extended
+    outline, so IoU alone misses partial blobs; containment catches them.
+    """
+    area = (box[2] - box[0]) * (box[3] - box[1])
+    intersection = max(0, min(box[2], excluded[2]) - max(box[0], excluded[0])) * max(
+        0, min(box[3], excluded[3]) - max(box[1], excluded[1])
+    )
+    return iou(box, excluded) >= iou_threshold or (area > 0 and intersection / area >= contained)
+
+
 def deduplicate(boxes: list[Proposal], threshold: float = 0.45) -> list[Proposal]:
     result: list[Proposal] = []
     for proposal in sorted(

@@ -81,7 +81,7 @@ def test_default_off_and_enabling_requires_saved_camera(tmp_path: Path) -> None:
     save(cameras)
     status = service.configure(AppliancePreferences(auto_observe=True))
     assert status.state == "scheduled" and status.camera_saved and not camera.requests
-    assert json.loads(service.path.read_text()) == {"auto_observe": True}
+    assert json.loads(service.path.read_text()) == {"auto_observe": True, "source": "camera"}
     assert service.path.stat().st_mode & 0o777 == 0o600
 
 
@@ -284,7 +284,9 @@ def test_startup_honors_camera_audio_preference_over_global_setting(
 
 
 @pytest.mark.parametrize("initially_live", [True, False])
-def test_authentication_failure_does_not_retry(tmp_path: Path, initially_live: bool) -> None:
+def test_authentication_failure_retries_only_after_a_long_delay(
+    tmp_path: Path, initially_live: bool,
+) -> None:
     service, cameras, camera = setup(tmp_path, Camera("live" if initially_live else "connecting"))
     save(cameras)
     service.configure(AppliancePreferences(auto_observe=True))
@@ -292,10 +294,63 @@ def test_authentication_failure_does_not_retry(tmp_path: Path, initially_live: b
     wait_for(service, "observing" if initially_live else "waiting")
     camera.current.error = "Camera authentication failed. Enter its local RTSP username and password."
     camera.current.status = "failed"
-    wait_for(service, "failed")
-    joined(service)
+    deadline = time.monotonic() + 3
+    while "authentication failed" not in service.status().message and time.monotonic() < deadline:
+        time.sleep(0.005)
+    status = service.status()
+    assert status.state == "waiting" and "try again in 15 minutes" in status.message
+    time.sleep(0.1)
+    # No rapid retries that could lock the camera account.
     assert len(camera.requests) == 1
-    assert "authentication failed" in service.status().message
+    service.shutdown()
+    joined(service)
+
+
+def test_authentication_failure_is_retried_after_the_configured_delay(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path, model_dir=tmp_path / "models")
+    settings.prepare()
+    cameras = CameraStore(Database(tmp_path / "falcon.sqlite3"), tmp_path / "private" / "camera.key")
+    camera = Camera("connecting")
+    service = ApplianceService(
+        settings, cameras, camera, connect_timeout=0.02, retry_delay=0.01, auth_retry_seconds=0.05,
+    )
+    save(cameras)
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "waiting")
+    camera.current.error = "Camera authentication failed."
+    camera.current.status = "failed"
+    deadline = time.monotonic() + 3
+    while len(camera.requests) < 2 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert len(camera.requests) == 2
+    service.shutdown()
+    joined(service)
+
+
+def test_stalled_live_analysis_is_restarted(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path, model_dir=tmp_path / "models")
+    settings.prepare()
+    cameras = CameraStore(Database(tmp_path / "falcon.sqlite3"), tmp_path / "private" / "camera.key")
+    camera = Camera("live")
+    camera.stuck = 0.0
+    camera.stuck_for = lambda: camera.stuck  # type: ignore[attr-defined]
+    service = ApplianceService(
+        settings, cameras, camera, connect_timeout=0.02, retry_delay=0.01, stall_seconds=60,
+    )
+    save(cameras)
+    service.configure(AppliancePreferences(auto_observe=True))
+    service.startup()
+    wait_for(service, "observing")
+    camera.stuck = 61.0
+    deadline = time.monotonic() + 3
+    while len(camera.requests) < 2 and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert camera.stopped[0] == "session-1"
+    assert len(camera.requests) == 2
+    camera.stuck = 0.0
+    service.shutdown()
+    joined(service)
 
 
 @pytest.mark.parametrize("action", ["manual_stop", "disable", "manual_analysis"])

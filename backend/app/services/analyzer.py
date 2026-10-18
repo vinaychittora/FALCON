@@ -85,7 +85,7 @@ class Analyzer:
         taxa = self.taxa.read()
         if not taxa.taxa:
             raise ValueError(
-                "Build the Rajasthan taxa cache before analysis (make taxa or Refresh taxa)."
+                "Build the local species list before analysis (make taxa, or Species → Refresh)."
             )
         job = Job(
             job_id=job_id or str(uuid4()),

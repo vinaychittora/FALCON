@@ -25,6 +25,7 @@ from app.schemas import (
     VisualEvent,
 )
 from app.schemas_live import CameraProfileWrite, LiveStart, LiveState
+from app.storage import jsonl
 from app.storage.cameras import CameraSecretError, CameraStore
 from app.storage.database import Database
 from app.storage.jobs import JobStore
@@ -104,19 +105,70 @@ def test_legacy_migration_preserves_files_models_reviews_and_audit(tmp_path: Pat
     assert JobStore(jobs, database).get("run-1") == job
 
 
-def test_malformed_migration_rolls_back_without_modifying_originals(tmp_path: Path) -> None:
+def test_malformed_mirror_is_skipped_without_blocking_startup(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture,
+) -> None:
     logs = tmp_path / "logs"
     logs.mkdir()
     original = event()
     (logs / f"{original.source_id}.jsonl").write_text(original.model_dump_json() + "\n")
     bad = logs / ("b" * 24 + ".jsonl")
     bad.write_text("{not-json}\n")
-    with pytest.raises(ValueError, match="Malformed JSONL record"):
-        EventStore(logs)
+    store = EventStore(logs)
+    assert "Skipped malformed JSONL record 1" in caplog.text
+    # The damaged file is untouched; the valid mirror still imports.
     assert bad.read_text() == "{not-json}\n"
+    assert store.read(original.source_id) == [original]
     with sqlite3.connect(tmp_path / "falcon.sqlite3") as connection:
-        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM legacy_imports").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 1
+    # Repairing the bad line in place is noticed and imported at the next start.
+    repaired = event(source="b" * 24)
+    bad.write_text(repaired.model_dump_json() + "\n")
+    assert EventStore(logs).read(repaired.source_id) == [repaired]
+
+
+def test_power_cut_during_append_does_not_block_restart(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    database = Database(tmp_path / "falcon.sqlite3")
+    store = EventStore(logs, database)
+    items = [event() for _ in range(4)]
+    for item in items:
+        store.append(item)
+    mirror = store.path(items[0].source_id)
+    complete = mirror.read_bytes()
+    # A torn final line, as left by a power cut during an unsynced append.
+    mirror.write_bytes(complete[:-25])
+    restarted = EventStore(logs, database)
+    assert restarted.read(items[0].source_id) == items
+    assert mirror.read_bytes() == complete[:-25]
+    # The next append terminates the torn record instead of merging with it.
+    later = event()
+    restarted.append(later)
+    assert mirror.read_bytes().startswith(complete[:-25] + b"\n")
+    assert EventStore(logs, database).read(later.source_id) == [*items, later]
+
+
+def test_restart_parses_only_records_added_since_the_last_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    logs = tmp_path / "logs"
+    database = Database(tmp_path / "falcon.sqlite3")
+    store = EventStore(logs, database)
+    for _ in range(5):
+        store.append(event())
+    EventStore(logs, database)
+    parsed: list[str] = []
+    original_validate = jsonl.adapter.validate_json
+
+    def counting(value: str | bytes) -> object:
+        parsed.append(str(value))
+        return original_validate(value)
+
+    monkeypatch.setattr(jsonl.adapter, "validate_json", counting)
+    store.append(event())
+    parsed.clear()
+    EventStore(logs, database)
+    assert len(parsed) == 1
 
 
 def test_concurrent_events_deduplicate_and_review_audit_is_durable(tmp_path: Path) -> None:
@@ -336,8 +388,10 @@ def test_concurrent_reviews_preserve_every_previous_review_and_mirror(tmp_path: 
     assert audits[0]["previous"]["status"] == "unreviewed"
     assert audits[1]["previous"] == audits[0]["review"]
     assert first.read(original.source_id)[0].review.model_dump() == audits[-1]["review"]
-    mirror = json.loads(first.path(original.source_id).read_text())
-    assert mirror["review"] == audits[-1]["review"]
+    # Append-only mirror: the latest line for an event supersedes earlier lines.
+    lines = [json.loads(line) for line in first.path(original.source_id).read_text().splitlines()]
+    latest = [line for line in lines if line["event_id"] == original.event_id][-1]
+    assert latest["review"] == audits[-1]["review"]
 
 
 def test_archive_search_includes_second_model_and_corrected_common_name_alias(
@@ -399,3 +453,16 @@ def test_application_data_is_private_before_database_creation(tmp_path: Path, mo
     monkeypatch.setattr(Database, "__init__", verify)
     create_app(Settings(data_dir=data, model_dir=tmp_path / "models"))
     assert checked
+
+
+def test_database_stays_compatible_with_the_previous_two_column_import_table(tmp_path: Path) -> None:
+    logs = tmp_path / "logs"
+    database = Database(tmp_path / "falcon.sqlite3")
+    store = EventStore(logs, database)
+    store.append(event())
+    EventStore(logs, database)
+    with database.connection() as connection:
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(legacy_imports)")]
+        # Older FALCON code inserts two positional values into this table.
+        connection.execute("INSERT OR REPLACE INTO legacy_imports VALUES (?, ?)", ("older-code", "digest"))
+    assert columns == ["path", "digest"]

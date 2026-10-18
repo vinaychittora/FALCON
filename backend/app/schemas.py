@@ -135,7 +135,9 @@ class Classification(BaseModel):
 
 
 class Review(BaseModel):
-    status: Literal["unreviewed", "correct", "false_positive", "corrected", "unknown"] = (
+    # discarded: not useful for the dataset (duplicate, blurred, empty frame). Kept in the
+    # audit trail, hidden from the working archive and left out of clean exports.
+    status: Literal["unreviewed", "correct", "false_positive", "corrected", "unknown", "discarded"] = (
         "unreviewed"
     )
     corrected_taxon_id: int | None = None
@@ -161,6 +163,7 @@ class EnvironmentReading(BaseModel):
     temperature_c: float | None = None
     humidity_percent: float | None = None
     pressure_hpa: float | None = None
+    surface_wet: bool | None = None
 
 
 class EvidenceSummary(BaseModel):

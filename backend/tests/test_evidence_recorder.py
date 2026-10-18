@@ -53,6 +53,7 @@ class Results:
 def feed(
     recorder: EvidenceRecorder, path: Path, *, trigger: float,
     request_at: float | None = None, evidence_id: str = "test-clip", stop_at: float | None = None,
+    request_start_ms: int | None = None,
 ) -> tuple[str, str]:
     pin_id = ""
     with av.open(str(path)) as source:
@@ -69,7 +70,7 @@ def feed(
                     )
                     pin_id = recorder.pin(frame) or ""
                 if pin_id and request_at is not None and timestamp >= request_at:
-                    recorder.request(pin_id, evidence_id)
+                    recorder.request(pin_id, evidence_id, start_ms=request_start_ms)
                     recorder.release(pin_id)
                     request_at = None
                 if stop_at is not None and timestamp >= stop_at:
@@ -319,3 +320,19 @@ def test_recorder_fault_does_not_interrupt_camera_preview(
     assert capture.reconnects == 0
     assert "native diagnostic" not in repr(capture.technical_metrics())
     assert "evidence_capture_fault" in capture.technical_metrics()
+
+
+def test_continuation_clip_starts_at_requested_time_and_is_complete(tmp_path: Path) -> None:
+    results = Results()
+    recorder = EvidenceRecorder(tmp_path / "evidence", results, reserve_bytes=0)
+    # The trigger frame is session time 15000 ms; the previous clip ended at 14000.
+    feed(
+        recorder, recording(tmp_path / "source.mp4"), trigger=5.0, request_at=5.0,
+        evidence_id="continuation", request_start_ms=14000,
+    )
+    assert results.finished.wait(10)
+    recorder.close()
+    result = results.values["continuation"]
+    assert result["status"] == "ready"
+    assert result["duration_ms"] == 4000
+    assert (result["actual_start_ms"], result["actual_end_ms"]) == (14000, 18000)

@@ -13,7 +13,7 @@ for argument in "$@"; do
   esac
 done
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
-  echo "The locked installer supports Linux x86-64. See docs/INSTALLATION.md for Jetson status."
+  echo "The locked installer supports Linux x86-64. See docs/INSTALL.md for Jetson status."
   exit 1
 fi
 if ! "$skip_setup"; then

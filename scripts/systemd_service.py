@@ -54,6 +54,9 @@ def render(root: Path) -> str:
         f"ExecStart=/bin/bash {quote(str(root / 'scripts' / 'serve.sh'), executable_argument=True)} run",
         "Restart=on-failure",
         "RestartSec=10",
+        # FALCON stops its heartbeat only when live analysis is stuck beyond recovery.
+        "WatchdogSec=600",
+        "NotifyAccess=main",
         "TimeoutStopSec=120",
         "KillMode=control-group",
         "UMask=0077",
@@ -169,7 +172,7 @@ def main() -> int:
         print("FALCON user service installed. Running servers were not changed.")
         if args.enable:
             print("Automatic startup is enabled for the user manager. Start it with make start.")
-            print("Boot without login also requires administrator-enabled lingering; see docs/APPLIANCE.md.")
+            print("Boot without login also requires administrator-enabled lingering; see docs/INSTALL.md.")
         return 0
     if args.enable:
         parser.error("--enable is only supported with install")

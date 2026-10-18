@@ -1,6 +1,6 @@
 [project]
 name = "falcon"
-version = "0.2.0"
+version = "1.0.0"
 description = "Field Acoustic, Lens & Climate Observation Node"
 requires-python = ">=3.11,<3.12"
 dependencies = [

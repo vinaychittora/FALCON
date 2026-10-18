@@ -1,0 +1,9 @@
+// Lets the falcon-node service restart or shut down the node when asked from FALCON's web UI.
+polkit.addRule(function (action, subject) {
+  if (subject.user === "falcon-node" && [
+    "org.freedesktop.login1.reboot", "org.freedesktop.login1.reboot-multiple-sessions",
+    "org.freedesktop.login1.power-off", "org.freedesktop.login1.power-off-multiple-sessions",
+  ].indexOf(action.id) >= 0) {
+    return polkit.Result.YES;
+  }
+});

@@ -1,0 +1,31 @@
+# FALCON sensor node settings: /etc/falcon-node/node.conf
+# The installer creates this file and fills in NODE_ID and PAIRING_KEY.
+# After editing: sudo systemctl restart falcon-node
+
+# A short identifier (letters, digits, . _ : -) and a friendly name shown in FALCON.
+NODE_ID=falcon-node-01
+NODE_NAME=FALCON sensor node
+
+# Enter this key in FALCON -> Sensors -> Add sensor node. Keep it private.
+PAIRING_KEY=
+
+# Ports: the control API that FALCON uses, and the RTSP stream it reads.
+API_PORT=8780
+RTSP_PORT=8554
+
+# What is attached. "auto" finds it; "off" ignores it.
+#   CAMERA      auto | rpicam | v4l2:/dev/video0 | off | an IP camera's RTSP address to relay
+#               (rtsp:// then user:password@camera-address/path)
+#   MICROPHONE  auto | alsa:plughw:CARD=Zero,DEV=0 | off   (the audio HAT is card "Zero")
+#   CLIMATE     auto | bme280 | bme280:0x77 | off           (BME280 at I2C 0x76 or 0x77)
+#   RAIN        auto | gpio:17 | off                        (rain controller DO wire)
+CAMERA=auto
+MICROPHONE=auto
+MICROPHONE_CHANNELS=2
+CLIMATE=auto
+RAIN=auto
+# Most LM393 rain modules pull DO low when the plate is wet. Set false if yours is inverted.
+RAIN_WET_WHEN_LOW=true
+
+# Seconds between weather readings.
+READING_INTERVAL_SECONDS=30

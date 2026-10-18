@@ -1,0 +1,320 @@
+/* Help pages in the style of the FALCON handbooks: a field manual with one readable
+   column, green section labels, numbered steps and quiet tables. */
+.page.help-page {
+  display: grid;
+  grid-template-columns: 230px minmax(0, 1fr) 210px;
+  gap: 28px;
+  align-items: start;
+  max-width: 1500px;
+}
+.page.help-page.no-toc {
+  grid-template-columns: 230px minmax(0, 1fr);
+}
+.help-nav,
+.help-toc {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  font-size: 0.875rem;
+}
+.help-nav nav,
+.help-toc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.help-nav h2,
+.help-toc h2 {
+  font-size: 0.6875rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--forest);
+  margin: 0 0 4px;
+  font-weight: 700;
+}
+.help-nav a,
+.help-toc a {
+  color: var(--muted);
+  text-decoration: none;
+  padding: 5px 10px;
+  border-radius: 7px;
+  line-height: 1.35;
+}
+.help-nav a:hover,
+.help-toc a:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+.help-nav a.active,
+.help-toc a.active {
+  color: var(--ink);
+  background: var(--surface-muted);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--forest);
+}
+.help-toc a.level-3 {
+  padding-left: 22px;
+  font-size: 0.8125rem;
+}
+.help-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--input-surface);
+  color: var(--muted);
+}
+.help-search input {
+  border: 0 !important;
+  background: transparent !important;
+  padding: 9px 0 !important;
+  width: 100%;
+  color: var(--ink) !important;
+  outline: none;
+}
+.help-main {
+  min-width: 0;
+  scroll-margin-top: 72px;
+}
+.help-article {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px 36px 36px;
+  font-size: 1rem;
+  line-height: 1.65;
+}
+.help-article .eyebrow {
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--forest);
+  margin: 0 0 8px;
+}
+.help-article h1 {
+  font-family:
+    "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  font-size: clamp(1.9rem, 3.2vw, 2.5rem);
+  line-height: 1.1;
+  margin: 0 0 8px;
+  font-weight: 700;
+}
+.help-article .lede {
+  color: var(--muted);
+  font-size: 1.0625rem;
+  margin: 0 0 22px;
+  max-width: 70ch;
+}
+.help-content {
+  max-width: 76ch;
+}
+.help-content h2,
+.help-content h3,
+.help-content h4 {
+  font-family:
+    "Barlow Semi Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  line-height: 1.2;
+  scroll-margin-top: 80px;
+}
+.help-content h2 {
+  font-size: 1.55rem;
+  margin: 34px 0 10px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line-subtle);
+}
+.help-content h3 {
+  font-size: 1.2rem;
+  margin: 24px 0 8px;
+}
+.help-content h4 {
+  font-size: 1.05rem;
+  margin: 18px 0 6px;
+}
+.help-content p,
+.help-content ul,
+.help-content ol {
+  margin: 0 0 12px;
+}
+.help-content ul {
+  padding-left: 1.3em;
+}
+.help-content li {
+  margin: 4px 0;
+}
+/* Numbered steps, as in the build handbook. */
+.help-content ol {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.help-content ol > li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 2.6rem;
+  min-height: 2rem;
+}
+.help-content ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: grid;
+  place-items: center;
+}
+.help-content code {
+  font-family:
+    ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 0.86em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  overflow-wrap: anywhere;
+}
+.help-content pre {
+  font-family:
+    ui-monospace, "Cascadia Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 0.85rem;
+  line-height: 1.55;
+  background: var(--surface-muted);
+  border-radius: 8px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  margin: 8px 0 14px;
+  white-space: pre;
+}
+.help-content .table-wrap {
+  overflow-x: auto;
+  margin: 8px 0 18px;
+}
+.help-content table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.92rem;
+}
+.help-content th,
+.help-content td {
+  text-align: left;
+  vertical-align: top;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+}
+.help-content th {
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+}
+.help-content blockquote {
+  margin: 10px 0 16px;
+  padding: 10px 16px;
+  border-left: 4px solid var(--warning);
+  background: var(--warning-surface);
+  border-radius: 0 8px 8px 0;
+}
+.help-content a {
+  color: var(--forest);
+}
+.help-content .repo-path {
+  border-bottom: 1px dotted var(--muted);
+}
+.help-source {
+  margin: 28px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line-subtle);
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.help-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0 0 18px;
+}
+.help-frame {
+  width: 100%;
+  height: calc(100vh - 230px);
+  min-height: 560px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.help-results {
+  list-style: none;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+.help-results a {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+  color: var(--ink);
+  text-decoration: none;
+}
+.help-results a:hover strong {
+  color: var(--forest);
+  text-decoration: underline;
+}
+.help-results small {
+  color: var(--muted);
+}
+.help-results p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.help-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.8125rem;
+  color: var(--forest);
+  text-decoration: none;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.help-link:hover {
+  background: var(--surface-hover);
+}
+@media (max-width: 1180px) {
+  .page.help-page {
+    grid-template-columns: 210px minmax(0, 1fr);
+  }
+  .help-toc {
+    display: none;
+  }
+}
+@media (max-width: 860px) {
+  .page.help-page,
+  .page.help-page.no-toc {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .help-nav {
+    position: static;
+    max-height: none;
+  }
+  .help-article {
+    padding: 20px 18px 26px;
+  }
+}

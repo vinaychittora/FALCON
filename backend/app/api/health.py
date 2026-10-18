@@ -22,7 +22,7 @@ def system_metrics(request: Request) -> SystemMetrics:
 def health(request: Request) -> dict[str, object]:
     return {
         "status": "ok",
-        "version": "0.2.0",
+        "version": request.app.version,
         "app": "falcon",
         "frontend_ready": (request.app.state.config.frontend_dir / "index.html").is_file(),
     }

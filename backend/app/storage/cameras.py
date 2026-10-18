@@ -51,6 +51,10 @@ class CameraStore:
         except (ValueError, OSError) as exc:
             raise CameraSecretError("The local camera key could not be opened.") from exc
 
+    def cipher(self, create: bool = False) -> Fernet:
+        """The device's local secret key, shared with sensor-node pairing keys."""
+        return self._cipher(create)
+
     def public(self) -> CameraProfile:
         with self.database.connection() as connection:
             row = connection.execute(

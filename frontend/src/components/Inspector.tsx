@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { scientificSubtitle } from "../api/names";
 import { api } from "../api/client";
+import { reviewEncounters } from "../api/encounters";
 import { captureTime } from "../api/observations";
 import { normalizeSearch, rankTaxa } from "../api/search";
 import {
@@ -42,6 +43,12 @@ const reviewOptions: {
     value: "false_positive",
     label: "Reject detection",
     detail: "No target organism in this detection.",
+  },
+  {
+    value: "discarded",
+    label: "Discard",
+    detail:
+      "Not useful: duplicate, blurred or empty. Hidden and never exported.",
   },
   {
     value: "unreviewed",
@@ -95,6 +102,7 @@ export default function Inspector({
   onSeek,
   onSaved,
   playEvidence = false,
+  encounter,
 }: {
   event: Detection;
   taxa: Taxon[];
@@ -103,6 +111,8 @@ export default function Inspector({
   onSeek?: (ms: number) => void;
   onSaved: (e: Detection) => void;
   playEvidence?: boolean;
+  /** When set, the decision applies to every record of this encounter. */
+  encounter?: { encounter_id: string; records: number };
 }) {
   const taxonNames = useTaxonNames();
   const dialog = useRef<HTMLDialogElement>(null);
@@ -162,6 +172,28 @@ export default function Inspector({
     setSaving(true);
     setError("");
     try {
+      if (encounter) {
+        await reviewEncounters([encounter.encounter_id], status, {
+          taxonId,
+          notes,
+        });
+        const taxon = taxa.find((item) => item.taxon_id === taxonId);
+        onSaved({
+          ...event,
+          review: {
+            status,
+            notes: notes.trim() || null,
+            corrected_taxon_id: status === "corrected" ? taxonId : null,
+            corrected_scientific_name:
+              status === "corrected" ? (taxon?.scientific_name ?? null) : null,
+            corrected_common_name:
+              status === "corrected" ? (taxon?.common_name ?? null) : null,
+            updated_at: new Date().toISOString(),
+          },
+        });
+        setSaved(true);
+        return;
+      }
       const updated = await api<Detection>(
         "/detections/" + event.event_id + "/review",
         {
@@ -431,7 +463,9 @@ export default function Inspector({
           <span role="status">
             {saved
               ? "Review saved"
-              : "Review is stored separately from model output."}
+              : encounter && encounter.records > 1
+                ? `Applies to all ${encounter.records} frame records of this encounter.`
+                : "Review is stored separately from model output."}
           </span>
           <button
             className="primary"

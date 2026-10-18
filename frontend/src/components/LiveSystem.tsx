@@ -6,6 +6,7 @@ import {
   type LiveSystemSnapshot,
   type Reading,
 } from "../api/liveSystem";
+import { wetness } from "../api/environment";
 import { classifierLabels } from "../api/models";
 import type { ClassifierMode } from "../types";
 import Icon, { type IconName } from "./Icon";
@@ -610,6 +611,13 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
               Pressure
             </dt>
             <dd>{number(sensors?.pressure_hpa, "hPa")}</dd>
+          </div>
+          <div>
+            <dt>
+              <Icon name="rain" size={17} />
+              Rain plate
+            </dt>
+            <dd>{wetness(sensors?.surface_wet)}</dd>
           </div>
         </dl>
         <p className="live-system-caption">

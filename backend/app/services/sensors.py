@@ -1,5 +1,6 @@
 """Real periodic sensor history and event-time lookup, independent of inference."""
 
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -30,6 +31,18 @@ class SensorHistoryProvider:
             raise ValueError("Use a positive sensor freshness interval of at most one day")
         self.store = SensorStore(database)
         self.sensor_id, self.stale_after_seconds = sensor_id, stale_after_seconds
+        # Set by the sensor-node manager: the node whose readings belong to current detections.
+        self.preferred: Callable[[], str | None] | None = None
+
+    def session_sensor_id(self) -> str | None:
+        """The sensor recorded with a live session, used to associate readings in exports."""
+        if self.sensor_id:
+            return self.sensor_id
+        preferred = self.preferred() if self.preferred else None
+        if preferred:
+            return preferred
+        nodes = self.store.node_ids()
+        return nodes[0] if len(nodes) == 1 else None
 
     def ingest(self, reading: SensorReadingWrite) -> tuple[SensorReading, bool]:
         return self.store.ingest(reading)
@@ -53,7 +66,7 @@ class SensorHistoryProvider:
             return EnvironmentReading()
         if captured_at.tzinfo is None or captured_at.utcoffset() is None:
             return EnvironmentReading(status="unavailable")
-        sensor_id = self.sensor_id
+        sensor_id = self.sensor_id or (self.preferred() if self.preferred else None)
         if sensor_id is None:
             nodes = self.store.node_ids()
             if not nodes:
@@ -75,4 +88,5 @@ class SensorHistoryProvider:
             sensor_id=sensor_id, observed_at=reading.observed_at.isoformat(),
             age_seconds=round(age, 2), temperature_c=reading.temperature_c,
             humidity_percent=reading.humidity_percent, pressure_hpa=reading.pressure_hpa,
+            surface_wet=reading.surface_wet,
         )

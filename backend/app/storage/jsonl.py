@@ -8,9 +8,9 @@ import os
 import sqlite3
 import threading
 import unicodedata
-from collections.abc import Iterator
-from contextlib import contextmanager
-from datetime import UTC, datetime
+from collections.abc import Iterable, Iterator
+from contextlib import ExitStack, contextmanager
+from datetime import UTC, datetime, timedelta
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any, Literal
@@ -25,6 +25,25 @@ from app.storage.lifecycle import lifecycle_lock
 from app.storage.observation_context import capture_time_sql, enrich_events, origin_sql, tables
 
 adapter: TypeAdapter[Event] = TypeAdapter(Event)  # type: ignore[arg-type]
+# Visual similarity or acoustic confidence, for minimum-score filters.
+SCORE_SQL = "COALESCE(json_extract(e.payload,'$.classification.score'), json_extract(e.payload,'$.confidence'))"
+# A visual track within one session or job is one animal visit; a sound detection stands alone.
+ENCOUNTER_KEY_SQL = (
+    "CASE WHEN e.modality='visual' THEN e.job_id || ':' || COALESCE(json_extract(e.payload,'$.track_id'), e.event_id) "
+    "ELSE e.event_id END"
+)
+
+
+def _captured(first: Event, enriched: Event) -> str | None:
+    """Capture time of the encounter's first record, from the enriched latest record's basis."""
+    if first.captured_at:
+        return first.captured_at
+    if not enriched.captured_at:
+        return None
+    offset = (enriched.timestamp_ms if enriched.modality == "visual" else enriched.start_ms) - (
+        first.timestamp_ms if first.modality == "visual" else first.start_ms
+    )
+    return (datetime.fromisoformat(enriched.captured_at) - timedelta(milliseconds=offset)).isoformat()
 logger = logging.getLogger(__name__)
 
 
@@ -116,6 +135,20 @@ def _insert(connection: sqlite3.Connection, event: Event, recorded_at: str) -> b
     return False
 
 
+def append_lines(path: Path, lines: Iterable[str], *, durable: bool = False) -> None:
+    """Append complete records, first terminating a record torn by a power cut."""
+    with path.open("a+b") as file:
+        if file.seek(0, os.SEEK_END):
+            file.seek(-1, os.SEEK_END)
+            if file.read(1) != b"\n":
+                # Keep the torn bytes, but never let them merge with a new record.
+                file.write(b"\n")
+        file.write("".join(line + "\n" for line in lines).encode("utf-8"))
+        file.flush()
+        if durable:
+            os.fsync(file.fileno())
+
+
 class EventStore:
     def __init__(self, directory: Path, database: Database | None = None):
         self.directory = directory
@@ -143,21 +176,70 @@ class EventStore:
                 fcntl.flock(lock_file, fcntl.LOCK_UN)
 
     def _migrate(self) -> None:
-        # A malformed file rolls back the import; every original remains untouched.
+        # SQLite is the authority. A damaged compatibility mirror must never stop
+        # the field application from starting: its import is rolled back, the file
+        # is left untouched, and other mirrors are still checked.
+        for path in sorted(self.directory.glob("*.jsonl")):
+            try:
+                self._import_mirror(path)
+            except (OSError, ValueError, sqlite3.Error):
+                logger.warning("Compatibility log %s could not be checked; it is preserved", path.name)
+
+    def _import_mirror(self, path: Path) -> None:
+        """Import complete records added since the last startup, in one transaction.
+
+        Live mirrors grow continuously, so only bytes after the previously imported
+        prefix are parsed when that prefix is unchanged. An unterminated final line
+        (for example after a power cut during an append) is left for a later check;
+        the application always commits to SQLite before writing its mirror line.
+        """
+        key = str(path.resolve())
         with self.database.connection() as connection:
-            for path in sorted(self.directory.glob("*.jsonl")):
-                raw = path.read_bytes()
-                digest = hashlib.sha256(raw).hexdigest()
-                previous = connection.execute(
-                    "SELECT digest FROM legacy_imports WHERE path=?", (str(path.resolve()),)
-                ).fetchone()
-                if previous and previous["digest"] == digest:
-                    continue
+            connection.execute("BEGIN IMMEDIATE")
+            previous = connection.execute(
+                "SELECT i.digest, o.imported_bytes FROM legacy_imports i "
+                "LEFT JOIN legacy_import_offsets o USING(path) WHERE i.path=?", (key,)
+            ).fetchone()
+            with path.open("rb") as source:
+                digest, offset = hashlib.sha256(), 0
+                if previous is not None:
+                    known = previous["imported_bytes"]
+                    prefix = hashlib.sha256()
+                    if known is None:
+                        # Databases from before incremental checks stored whole-file digests.
+                        while block := source.read(1024 * 1024):
+                            prefix.update(block)
+                        if prefix.hexdigest() == previous["digest"]:
+                            connection.execute(
+                                "INSERT OR REPLACE INTO legacy_import_offsets VALUES (?, ?)",
+                                (key, source.tell()),
+                            )
+                            return
+                    else:
+                        remaining = known
+                        while remaining > 0 and (block := source.read(min(remaining, 1024 * 1024))):
+                            prefix.update(block)
+                            remaining -= len(block)
+                        if remaining == 0 and prefix.hexdigest() == previous["digest"]:
+                            digest, offset = prefix, known
+                    if offset == 0:
+                        # The file was replaced or truncated; check it again from the start.
+                        source.seek(0)
                 recorded_at = datetime.fromtimestamp(path.stat().st_mtime, UTC).isoformat()
-                for number, line in enumerate(raw.decode("utf-8").splitlines(), 1):
-                    if not line.strip():
-                        continue
+                start = offset
+                for number, raw in enumerate(source, 1):
+                    if not raw.endswith(b"\n"):
+                        logger.warning(
+                            "Ignoring an incomplete final record in %s; it is retained in the file",
+                            path.name,
+                        )
+                        break
+                    digest.update(raw)
+                    offset += len(raw)
                     try:
+                        line = raw.decode("utf-8")
+                        if not line.strip():
+                            continue
                         if path.stem == "reviews":
                             item = json.loads(line)
                             Review.model_validate(item["previous"])
@@ -165,26 +247,31 @@ class EventStore:
                             audit_id = (
                                 item.get("audit_id")
                                 or hashlib.sha256(
-                                    f"{path.name}:{number}:{line}".encode()
+                                    f"{path.name}:{number}:{line.rstrip(chr(10))}".encode()
                                 ).hexdigest()
                             )
                             connection.execute(
                                 "INSERT OR IGNORE INTO review_audit VALUES (?, ?, ?, ?)",
-                                (audit_id, item["event_id"], recorded_at, line),
+                                (audit_id, item["event_id"], recorded_at, line.rstrip("\n")),
                             )
                         else:
                             event = adapter.validate_json(line)
                             if self.path(event.source_id).name != path.name:
                                 raise ValueError("Source ID does not match the log")
                             _insert(connection, event, recorded_at)
-                    except (ValueError, KeyError, TypeError) as exc:
-                        raise ValueError(
-                            f"Malformed JSONL record {number} in {path.name}; log preserved"
-                        ) from exc
-                connection.execute(
-                    "INSERT OR REPLACE INTO legacy_imports VALUES (?, ?)",
-                    (str(path.resolve()), digest),
-                )
+                    except (ValueError, KeyError, TypeError):
+                        # One bad line (for example a torn record terminated by a later
+                        # append) must not hide the rest. The file itself is never changed.
+                        position = f"record {number} after byte {start}" if start else f"record {number}"
+                        logger.warning(
+                            "Skipped malformed JSONL %s in %s; the log is preserved", position, path.name
+                        )
+            connection.execute(
+                "INSERT OR REPLACE INTO legacy_imports VALUES (?, ?)", (key, digest.hexdigest())
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO legacy_import_offsets VALUES (?, ?)", (key, offset)
+            )
 
     def append(self, event: Event) -> None:
         path = self.path(event.source_id)
@@ -195,9 +282,7 @@ class EventStore:
                 return
             try:
                 self.directory.mkdir(parents=True, exist_ok=True)
-                with path.open("a") as file:
-                    file.write(event.model_dump_json() + "\n")
-                    file.flush()
+                append_lines(path, [event.model_dump_json()])
             except OSError:
                 logger.warning(
                     "Observation is saved in SQLite; its JSONL export could not be updated"
@@ -274,9 +359,7 @@ class EventStore:
                 )
             try:
                 if inserted:
-                    with self.path(job.source_id).open("a") as file:
-                        file.writelines(event.model_dump_json() + "\n" for event in inserted)
-                        file.flush()
+                    append_lines(self.path(job.source_id), [event.model_dump_json() for event in inserted])
             except OSError:
                 logger.warning("Analysis checkpoint is saved in SQLite; JSONL export failed")
 
@@ -303,6 +386,10 @@ class EventStore:
         modality: str | None = None,
         name_aliases: dict[str, float] | None = None,
         scope: Literal["live", "all"] = "all",
+        captured_from: datetime | None = None,
+        captured_to: datetime | None = None,
+        min_score: float | None = None,
+        include_discarded: bool = False,
     ) -> dict[str, Any]:
         limit, offset = min(500, max(1, limit)), max(0, offset)
         conditions: list[str] = []
@@ -316,11 +403,21 @@ class EventStore:
             if value:
                 conditions.append(f"e.{column}=?")
                 parameters.append(value)
+        if not include_discarded and review_status != "discarded":
+            # Discarded records stay in the audit trail but leave the working archive.
+            conditions.append("e.review_status!='discarded'")
+        if min_score is not None:
+            conditions.append(f"{SCORE_SQL}>=?")
+            parameters.append(min_score)
         search = normalize((q or "")[:200])
         with self.database.connection() as connection:
             available = tables(connection)
             if scope == "live":
                 conditions.append(f"({origin_sql(available)})='live'")
+            for operator, moment in ((">=", captured_from), ("<=", captured_to)):
+                if moment is not None:
+                    conditions.append(f"julianday({capture_time_sql(available)}){operator}julianday(?)")
+                    parameters.append(moment.astimezone(UTC).isoformat())
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             base = "SELECT e.payload, e.recorded_at, e.rowid FROM observations e" + where
             if search:
@@ -360,6 +457,136 @@ class EventStore:
             events = enrich_events(connection, [adapter.validate_json(row["payload"]) for row in rows], available=available)
         return {"events": events, "total": total}
 
+    def read_ids(self, event_ids: list[str]) -> list[Event]:
+        if not event_ids:
+            return []
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                f"SELECT payload FROM observations WHERE event_id IN ({','.join('?' * len(event_ids))})", event_ids,
+            ).fetchall()
+        return [adapter.validate_json(row["payload"]) for row in rows]
+
+    def _filters(
+        self, connection: sqlite3.Connection, *, source_id: str | None, scope: Literal["live", "all"],
+        review_status: str | None, modality: str | None, captured_from: datetime | None,
+        captured_to: datetime | None, min_score: float | None, include_discarded: bool, q: str | None,
+    ) -> tuple[list[str], list[Any]]:
+        available = tables(connection)
+        conditions: list[str] = []
+        parameters: list[Any] = []
+        for column, value in (("source_id", source_id), ("modality", modality)):
+            if value:
+                conditions.append(f"e.{column}=?")
+                parameters.append(value)
+        if review_status == "mixed":
+            review_status = None
+        if review_status:
+            conditions.append("e.review_status=?")
+            parameters.append(review_status)
+        elif not include_discarded:
+            conditions.append("e.review_status!='discarded'")
+        if scope == "live":
+            conditions.append(f"({origin_sql(available)})='live'")
+        if min_score is not None:
+            conditions.append(f"{SCORE_SQL}>=?")
+            parameters.append(min_score)
+        for operator, moment in ((">=", captured_from), ("<=", captured_to)):
+            if moment is not None:
+                conditions.append(f"julianday({capture_time_sql(available)}){operator}julianday(?)")
+                parameters.append(moment.astimezone(UTC).isoformat())
+        search = normalize((q or "")[:200])
+        if search:
+            conditions.append("e.event_id IN (SELECT event_id FROM observation_terms WHERE value LIKE ?)")
+            parameters.append(f"%{search}%")
+        return conditions, parameters
+
+    def encounters(
+        self, *, source_id: str | None = None, scope: Literal["live", "all"] = "all",
+        review_status: str | None = None, modality: str | None = None,
+        captured_from: datetime | None = None, captured_to: datetime | None = None,
+        min_score: float | None = None, include_discarded: bool = False, q: str | None = None,
+        limit: int = 50, offset: int = 0,
+    ) -> dict[str, Any]:
+        """One row per animal visit: a visual track, or a single sound detection.
+
+        Frame-level records of the same track are grouped, so a reviewer decides once
+        per encounter instead of once per analyzed frame.
+        """
+        limit, offset = min(200, max(1, limit)), max(0, offset)
+        with self.database.connection() as connection:
+            available = tables(connection)
+            conditions, parameters = self._filters(
+                connection, source_id=source_id, scope=scope, review_status=review_status, modality=modality,
+                captured_from=captured_from, captured_to=captured_to, min_score=min_score,
+                include_discarded=include_discarded, q=q,
+            )
+            where = " WHERE " + " AND ".join(conditions) if conditions else ""
+            capture = capture_time_sql(available)
+            grouped = (
+                f"SELECT {ENCOUNTER_KEY_SQL} AS encounter_id, COUNT(*) AS records, "
+                f"MIN(COALESCE(julianday({capture}), julianday(e.recorded_at))) AS first_day, "
+                f"MAX(COALESCE(julianday({capture}), julianday(e.recorded_at))) AS last_day, "
+                "GROUP_CONCAT(DISTINCT e.review_status) AS statuses "
+                "FROM observations e" + where + " GROUP BY encounter_id"
+            )
+            total = connection.execute(f"SELECT COUNT(*) FROM ({grouped})", parameters).fetchone()[0]
+            groups = connection.execute(
+                f"SELECT * FROM ({grouped}) ORDER BY last_day DESC, encounter_id LIMIT ? OFFSET ?",
+                [*parameters, limit, offset],
+            ).fetchall()
+            if not groups:
+                return {"encounters": [], "total": total}
+            keys = [group["encounter_id"] for group in groups]
+            rows = connection.execute(
+                f"SELECT e.payload, {ENCOUNTER_KEY_SQL} AS encounter_id FROM observations e"
+                + where + (" AND " if where else " WHERE ")
+                + f"{ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(keys))}) ORDER BY e.timestamp_ms",
+                [*parameters, *keys],
+            ).fetchall()
+            members: dict[str, list[Event]] = {}
+            for row in rows:
+                members.setdefault(row["encounter_id"], []).append(adapter.validate_json(row["payload"]))
+            latest = enrich_events(
+                connection, [members[key][-1] for key in keys if members.get(key)], available=available,
+            )
+        latest_by_key = {key: event for key, event in zip([k for k in keys if members.get(k)], latest, strict=True)}
+        result = []
+        for group in groups:
+            key = group["encounter_id"]
+            events = members.get(key, [])
+            if not events:
+                continue
+            event = latest_by_key[key]
+            statuses = (group["statuses"] or "").split(",")
+            best = max(
+                events, key=lambda item: (item.detector.score or 0) if item.modality == "visual" else item.confidence,
+            )
+            first, last = events[0], events[-1]
+            start = first.timestamp_ms if first.modality == "visual" else first.start_ms
+            end = (last.timestamp_ms + last.duration_ms) if last.modality == "visual" else last.end_ms
+            result.append({
+                "encounter_id": key, "modality": event.modality, "source_id": event.source_id,
+                "source_filename": event.source_filename, "job_id": event.job_id,
+                "track_id": event.track_id if event.modality == "visual" else None,
+                "records": group["records"], "first_captured_at": _captured(first, event),
+                "duration_ms": max(0, end - start), "review_status": statuses[0] if len(statuses) == 1 else "mixed",
+                "thumbnail_event_id": best.event_id, "event": event,
+            })
+        return {"encounters": result, "total": total}
+
+    def encounter_event_ids(self, encounter_ids: list[str], *, include_discarded: bool = True) -> list[str]:
+        if not encounter_ids:
+            return []
+        ids: list[str] = []
+        with self.database.connection() as connection:
+            for start in range(0, len(encounter_ids), 400):
+                chunk = encounter_ids[start:start + 400]
+                ids += [row[0] for row in connection.execute(
+                    f"SELECT e.event_id FROM observations e WHERE {ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(chunk))})"
+                    + ("" if include_discarded else " AND e.review_status!='discarded'"), chunk,
+                )]
+        return ids
+
     def sources(self, scope: Literal["live", "all"] = "all") -> list[dict[str, Any]]:
         with self.database.connection() as connection:
             available = tables(connection)
@@ -388,59 +615,79 @@ class EventStore:
         return result
 
     def review(self, event_id: str, review: Review) -> Event:
-        with self.database.connection() as connection:
-            source = connection.execute(
-                "SELECT source_id FROM observations WHERE event_id=?", (event_id,)
-            ).fetchone()
-        if source is None:
+        updated, _ = self.review_many([event_id], review)
+        if not updated:
             raise KeyError(event_id)
-        with lifecycle_lock(self.database.path.parent), self.lock, self._source_lock(source["source_id"]):
+        return updated[0]
+
+    def review_many(self, event_ids: list[str], review: Review) -> tuple[list[Event], list[str]]:
+        """Apply one review decision to many observations in one audited transaction.
+
+        Returns (updated observations, IDs that were not found).
+        """
+        unique = list(dict.fromkeys(event_ids))
+        if not unique:
+            return [], []
+        with self.database.connection() as connection:
+            rows = connection.execute(
+                f"SELECT event_id, source_id FROM observations WHERE event_id IN ({','.join('?' * len(unique))})",
+                unique,
+            ).fetchall()
+        sources = sorted({row["source_id"] for row in rows})
+        found = {row["event_id"] for row in rows}
+        missing = [event_id for event_id in unique if event_id not in found]
+        updated: list[Event] = []
+        audits: list[dict[str, Any]] = []
+        if not found:
+            return updated, missing
+        with lifecycle_lock(self.database.path.parent), self.lock, ExitStack() as locks:
+            for source_id in sources:
+                locks.enter_context(self._source_lock(source_id))
             with self.database.connection() as connection:
                 # Acquire the SQLite writer lease before reading the previous review.
                 # This keeps the audit chain correct across app/store instances.
                 connection.execute("BEGIN IMMEDIATE")
-                row = connection.execute(
-                    "SELECT payload FROM observations WHERE event_id=?", (event_id,)
-                ).fetchone()
-                if row is None:
-                    raise KeyError(event_id)
-                target = adapter.validate_json(row["payload"])
-                audit = {
-                    "audit_id": str(uuid4()),
-                    "event_id": event_id,
-                    "previous": target.review.model_dump(),
-                    "review": review.model_dump(),
-                }
-                target.review = review.model_copy(deep=True)
-                connection.execute(
-                    "UPDATE observations SET payload=?, review_status=? WHERE event_id=?",
-                    (target.model_dump_json(), review.status, event_id),
-                )
-                _index_terms(connection, target)
-                connection.execute(
-                    "INSERT INTO review_audit VALUES (?, ?, ?, ?)",
-                    (audit["audit_id"], event_id, now(), json.dumps(audit)),
-                )
+                for event_id in unique:
+                    if event_id not in found:
+                        continue
+                    row = connection.execute(
+                        "SELECT payload FROM observations WHERE event_id=?", (event_id,)
+                    ).fetchone()
+                    if row is None:
+                        missing.append(event_id)
+                        continue
+                    target = adapter.validate_json(row["payload"])
+                    audit = {
+                        "audit_id": str(uuid4()),
+                        "event_id": event_id,
+                        "previous": target.review.model_dump(),
+                        "review": review.model_dump(),
+                    }
+                    target.review = review.model_copy(deep=True)
+                    connection.execute(
+                        "UPDATE observations SET payload=?, review_status=? WHERE event_id=?",
+                        (target.model_dump_json(), review.status, event_id),
+                    )
+                    _index_terms(connection, target)
+                    connection.execute(
+                        "INSERT INTO review_audit VALUES (?, ?, ?, ?)",
+                        (audit["audit_id"], event_id, now(), json.dumps(audit)),
+                    )
+                    updated.append(target)
+                    audits.append(audit)
             # SQLite review and audit are one transaction. Export failure cannot lose either.
+            # The mirror is append-only: a later line with the same event_id supersedes
+            # earlier ones. Rewriting the whole session here made each review cost
+            # O(session size) while blocking live observation writes.
             try:
                 self.directory.mkdir(parents=True, exist_ok=True)
-                path = self.path(target.source_id)
-                temporary = path.with_suffix(f".{uuid4().hex}.tmp")
-                try:
-                    with temporary.open("w") as file:
-                        for event in self.read(target.source_id):
-                            file.write(event.model_dump_json() + "\n")
-                        file.flush()
-                        os.fsync(file.fileno())
-                    temporary.replace(path)
-                finally:
-                    temporary.unlink(missing_ok=True)
-                with (self.directory / "reviews.jsonl").open("a") as audit_file:
-                    audit_file.write(json.dumps(audit) + "\n")
-                    audit_file.flush()
-                    os.fsync(audit_file.fileno())
+                for source_id in sources:
+                    lines = [event.model_dump_json() for event in updated if event.source_id == source_id]
+                    if lines:
+                        append_lines(self.path(source_id), lines, durable=True)
+                append_lines(self.directory / "reviews.jsonl", [json.dumps(audit) for audit in audits], durable=True)
             except OSError:
                 logger.warning(
                     "Review and audit are saved in SQLite; JSONL exports could not be updated"
                 )
-            return target
+        return updated, missing

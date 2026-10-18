@@ -195,7 +195,9 @@ def test_refresh_request_rejects_unsupported_limits() -> None:
     with pytest.raises(ValidationError, match="supported groups"):
         RefreshRequest(limits={"made-up-group": 12})
     with pytest.raises(ValidationError, match="supported groups"):
-        RefreshRequest(limits={"Aves": 1001})
+        RefreshRequest(limits={"Aves": -1})
+    assert RefreshRequest(limits={"Aves": 1500}).limits == {"Aves": 1500}
+    assert set(RefreshRequest().limits.values()) == {None}  # no cap by default
 
 
 def test_refresh_retains_explicit_selections_and_preserves_cache_on_failure(
@@ -226,3 +228,54 @@ def test_refresh_retains_explicit_selections_and_preserves_cache_on_failure(
     assert service.path.read_bytes() == previous
     assert service.read().error == "Provider unavailable"
     assert service.read().refreshing is False
+
+
+def test_species_list_can_be_built_for_another_place(tmp_path: Path) -> None:
+    places = [
+        {"name": "Kerala", "display_name": "Kerala, IN", "admin_level": 10, "id": 7},
+        {"name": "Kerala Varma Nagar", "display_name": "Kerala Varma Nagar, Thrissur, IN", "id": 8},
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("places/autocomplete"):
+            return httpx.Response(200, json={"results": places if request.url.params["q"] == "Kerala" else []})
+        if request.url.path.endswith("places/7"):
+            return httpx.Response(200, json={"results": [places[0]]})
+        if request.url.path.endswith("taxa/autocomplete"):
+            return httpx.Response(200, json={"results": [{"id": 3, "name": "Aves", "is_active": True}]})
+        assert request.url.params["place_id"] == "7"
+        return httpx.Response(200, json={"results": [
+            {"count": 5, "taxon": {"id": 1, "name": "Test bird", "rank": "species", "is_active": True}},
+        ]})
+
+    with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://api.inaturalist.org/v1/") as client:
+        api = INaturalist(tmp_path, client, interval=0)
+        result = api.build(RefreshRequest(place="Kerala, India", limits={"Aves": 10}))
+        assert (result.place_id, result.place_name) == (7, "Kerala, IN")
+        assert result.coverage_basis.startswith("Kerala, IN research-grade")
+        assert api.resolve_place("7")["id"] == 7
+        with pytest.raises(ValueError, match="Could not resolve one iNaturalist place"):
+            api.resolve_place("Atlantis")
+
+
+def test_insect_query_leaves_out_orders_that_are_their_own_groups(tmp_path: Path) -> None:
+    seen: list[dict[str, str]] = []
+    ids = {"Insecta": 47158, "Lepidoptera": 47157, "Odonata": 47792, "Aves": 3}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("places/autocomplete"):
+            return httpx.Response(200, json={"results": [_place()]})
+        if request.url.path.endswith("taxa/autocomplete"):
+            name = request.url.params["q"]
+            return httpx.Response(200, json={"results": [{"id": ids[name], "name": name, "is_active": True}]})
+        seen.append(dict(request.url.params))
+        return httpx.Response(200, json={"results": [_row(9000 + len(seen), 5)], "total_results": 1})
+
+    with httpx.Client(transport=httpx.MockTransport(handler), base_url="https://api.inaturalist.org/v1/") as client:
+        result = INaturalist(tmp_path, client, interval=0).build(
+            RefreshRequest(limits={"Insecta": None, "Lepidoptera": None, "Odonata": 0, "Aves": None})
+        )
+    insects = [params for params in seen if params["taxon_id"] == "47158"]
+    assert insects and insects[0]["without_taxon_id"] == "47157,47792"
+    assert all("without_taxon_id" not in params for params in seen if params["taxon_id"] != "47158")
+    assert result.limits["Insecta"] is None and "Odonata is disabled" in " ".join(result.warnings)

@@ -36,7 +36,9 @@ export const displayLabel = (e: Detection, taxa?: TaxonNameIndex) =>
       ? "Unknown · reviewed"
       : e.review.status === "false_positive"
         ? "False positive · reviewed"
-        : predictionLabel(e);
+        : e.review.status === "discarded"
+          ? `${predictionLabel(e)} · discarded`
+          : predictionLabel(e);
 
 /** Scientific subtitle only when it adds information to the primary label. */
 export const displayScientificName = (

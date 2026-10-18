@@ -80,8 +80,10 @@ class JobStore:
                     continue
                 try:
                     job = Job.model_validate_json(raw)
-                except ValueError as exc:
-                    raise ValueError(f"Malformed job in {path.name}; original preserved") from exc
+                except ValueError:
+                    # SQLite is the authority; a damaged export must not stop startup.
+                    logger.warning("Skipped malformed job export %s; original preserved", path.name)
+                    continue
                 connection.execute(
                     "INSERT OR IGNORE INTO jobs VALUES (?, ?, ?, ?)",
                     (job.job_id, job.source_id, job.created_at, job.model_dump_json()),

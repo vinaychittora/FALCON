@@ -39,6 +39,8 @@ class LocalRequestPolicyMiddleware:
             return
         headers = Headers(scope=scope)
         private_api = scope.get("path", "").startswith("/api/")
+        help_file = scope.get("path", "").startswith("/api/help/files/")
+        pdf = help_file and scope.get("path", "").endswith(".pdf")
         if private_api and not scope.get("falcon.remote_authenticated") and not local_browser_request(headers):
             await JSONResponse(
                 {"detail": "Requests must originate from the local application"}, status_code=403
@@ -90,10 +92,22 @@ class LocalRequestPolicyMiddleware:
                 return
             if message["type"] == "http.response.start":
                 response_headers = list(message.get("headers", []))
+                if help_file:
+                    # Handbooks may be shown inside FALCON's own Help page, and only there.
+                    # The HTML handbook may not fetch anything (such as web fonts) from outside.
+                    framing = [
+                        (b"x-frame-options", b"SAMEORIGIN"),
+                        (b"content-security-policy", b"frame-ancestors 'self'" if pdf else
+                         b"default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'"),
+                    ]
+                else:
+                    framing = [
+                        (b"x-frame-options", b"DENY"),
+                        (b"content-security-policy", b"frame-ancestors 'none'"),
+                    ]
                 response_headers += [
                     (b"x-content-type-options", b"nosniff"),
-                    (b"x-frame-options", b"DENY"),
-                    (b"content-security-policy", b"frame-ancestors 'none'"),
+                    *framing,
                     (b"referrer-policy", b"no-referrer"),
                 ]
                 if private_api:

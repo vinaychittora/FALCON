@@ -8,7 +8,7 @@ from starlette.responses import FileResponse
 from starlette.types import Receive, Scope, Send
 
 from app.schemas_evidence import EvidencePage, EvidenceRecord
-from app.services.evidence_export import build_evidence_archive
+from app.services.evidence_export import InsufficientExportSpace, build_evidence_archive
 from app.storage.evidence import EvidenceStore
 
 router = APIRouter(prefix="/api/evidence", tags=["evidence"])
@@ -44,8 +44,15 @@ def export_evidence(
         state = live.state()
         if state.status in {"connecting", "live", "reconnecting"}:
             active_session_id = state.session_id
-    path = build_evidence_archive(store, source_id=source_id, scope=scope,
-        active_session_id=active_session_id, taxonomy=getattr(request.app.state, "taxa", None))
+    try:
+        path = build_evidence_archive(store, source_id=source_id, scope=scope,
+            active_session_id=active_session_id, taxonomy=getattr(request.app.state, "taxa", None))
+    except InsufficientExportSpace as exc:
+        needed = exc.required / 1024**3
+        raise HTTPException(
+            507, f"Not enough free storage to build this export (about {needed:.1f} GB needed, "
+            "including a safety reserve for live capture). Free space or export one session at a time.",
+        ) from None
     return TemporaryArchiveResponse(
         path, media_type="application/zip", filename="falcon-evidence.zip",
         headers={"Cache-Control": "no-store"},

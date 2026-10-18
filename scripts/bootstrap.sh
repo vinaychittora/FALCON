@@ -2,7 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [[ "$(uname -s)" != Linux || "$(uname -m)" != x86_64 ]]; then
-  echo "This locked runtime supports Linux x86-64. See docs/INSTALLATION.md for Jetson status."
+  echo "This locked runtime supports Linux x86-64. See docs/INSTALL.md for Jetson status."
   exit 1
 fi
 export PATH="$HOME/.local/bin:$PATH"

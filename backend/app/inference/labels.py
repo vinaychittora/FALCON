@@ -3,6 +3,7 @@ from numpy.typing import NDArray
 
 from app.inference.classifier_models import classifier_specs
 from app.schemas import AnalysisSettings, Candidate, Classification, ModelEvidence
+from app.taxonomy.domestic import is_domestic
 from app.taxonomy.inaturalist import Taxon
 
 GROUP_NAMES = {
@@ -62,7 +63,8 @@ def classify_label(
         top_k=candidates,
         display_label=f"Unknown {GROUP_NAMES.get(group, 'organism')}"
         if reason
-        else f"{top.common_name or top.scientific_name} — candidate",
+        else f"{top.common_name or top.scientific_name} — "
+        + ("domestic animal candidate" if is_domestic(top.scientific_name) else "candidate"),
     )
 
 

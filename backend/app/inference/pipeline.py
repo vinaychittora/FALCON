@@ -11,7 +11,7 @@ from PIL import Image
 from app.inference.base import Classifier, Detector
 from app.inference.classifier_models import classifier_specs
 from app.inference.labels import classify_models
-from app.inference.motion import MotionDetector, deduplicate
+from app.inference.motion import MotionDetector, deduplicate, overlaps_excluded
 from app.inference.regions import SceneCuts, detect_regions
 from app.inference.tracker import IoUTracker
 from app.media.base import Frame, MediaSource
@@ -42,6 +42,7 @@ def visual_pipeline(
     checkpoint: Callable[[int, float, int], None] | None = None,
     metrics_progress: Callable[[dict[str, float | int | str]], None] | None = None,
     frame_context: Callable[[Frame], AbstractContextManager[None]] | None = None,
+    crop_sink: Callable[[VisualEvent, np.ndarray], None] | None = None,
 ) -> dict[str, float | int | str]:
     sensors = sensors or DisconnectedSensors()
     tracker = IoUTracker(
@@ -100,7 +101,14 @@ def visual_pipeline(
             )
             detector_seconds += time.perf_counter() - tick
             if motion:
-                proposals += motion.detect(region)
+                # A walking person or moving vehicle also creates a motion blob. Drop
+                # those blobs while the non-wildlife boxes are still known; otherwise
+                # the blob survives filtering and is classified as an animal.
+                excluded = [p.bbox for p in proposals if p.label not in {"animal", "motion"}]
+                proposals += [
+                    blob for blob in motion.detect(region)
+                    if not any(overlaps_excluded(blob.bbox, box) for box in excluded)
+                ]
             proposals = deduplicate(
                 [p for p in proposals if config.log_non_wildlife or p.label in {"animal", "motion"}]
             )[: config.max_proposals]
@@ -169,9 +177,19 @@ def visual_pipeline(
                         label=proposal.label, score=proposal.score, model=proposal.model
                     ),
                     classification=classification,
-                    models={**versions, "proposal_filter_version": "tile-boundary-containment-v1"},
+                    models={
+                        **versions, "proposal_filter_version": "tile-boundary-containment-v1",
+                        **({"motion_filter_version": "non-wildlife-overlap-v1"} if motion else {}),
+                    },
                     environment=sensors.snapshot(frame.captured_at),
                 )
+                if crop_sink is not None and proposal.label in {"animal", "motion"}:
+                    # Live review thumbnails: a little context around the box, kept in memory only.
+                    pad_x, pad_y = (c - a) * 0.15, (d - b) * 0.15
+                    crop_sink(event, frame.rgb[
+                        int(max(0.0, b - pad_y) * height): max(int(max(0.0, b - pad_y) * height) + 1, int(min(1.0, d + pad_y) * height)),
+                        int(max(0.0, a - pad_x) * width): max(int(max(0.0, a - pad_x) * width) + 1, int(min(1.0, c + pad_x) * width)),
+                    ])
                 emit(event)
                 detections += 1
             sampled += 1

@@ -1,23 +1,30 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import App from "./App";
+import App, { helpRoute, pageFromHash, PAGES } from "./App";
 
-describe("field-first navigation", () => {
-  it("opens Monitor by default and separates Media tests from Field observations", () => {
+describe("application shell", () => {
+  it("opens Live by default with every section in the main navigation", () => {
     const html = renderToStaticMarkup(<App />);
+    expect(html).toContain('href="#/live" class="active" aria-current="page"');
+    for (const item of PAGES) expect(html).toContain(`href="#/${item.page}"`);
+    expect(html).toContain("<h1>Live <a");
+    expect(html).toContain('href="#/help/user-guide/live"');
+    expect(html).toContain("Start observing");
     expect(html).toContain(
-      'id="workspace-tab-monitor" role="tab" aria-selected="true"',
-    );
-    expect(html).toContain('<h1 class="sr-only">Monitor</h1>');
-    expect(html).toContain('aria-labelledby="workspace-tab-monitor"');
-    expect(html).toContain("Media tests</button>");
-    expect(html).toContain("Observations</button>");
-    expect(html).not.toContain("Upload photo, video or audio");
-    expect(html).not.toContain("Field observations</h1>");
-    expect(html).not.toContain('class="page-heading"');
-    expect(html).not.toContain(
-      "Live camera, audio and environmental readings.",
+      "Field Acoustic, Lens &amp; Climate Observation Node",
     );
     expect(html).toContain("Display and accessibility options");
+    expect(html).not.toContain("Upload photo, video or audio");
+  });
+
+  it("reads the page from the address hash and falls back to Live", () => {
+    expect(pageFromHash("#/review")).toBe("review");
+    expect(pageFromHash("#export")).toBe("export");
+    expect(pageFromHash("#/sensors?node=1")).toBe("sensors");
+    expect(pageFromHash("#/unknown")).toBe("live");
+    expect(pageFromHash("")).toBe("live");
+    expect(pageFromHash("#/help/sensor-node/checks")).toBe("help");
+    expect(helpRoute("#/help/sensor-node/checks")).toBe("sensor-node/checks");
+    expect(helpRoute("#/live")).toBe("");
   });
 });

@@ -252,8 +252,8 @@ export default function Settings({
           />
         </label>
         <p className="muted">
-          Without coordinates, BirdNET uses the configured Rajasthan bird list.
-          Week values use four BirdNET weeks per month.
+          Without coordinates, BirdNET uses the local bird list. Week values use
+          four BirdNET weeks per month.
         </p>
         <button className="primary" disabled={busy} onClick={onSave}>
           Save configuration

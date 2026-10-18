@@ -4,6 +4,7 @@ import fcntl
 import hashlib
 import io
 import json
+import wave
 from collections.abc import Iterable
 from pathlib import Path
 from types import SimpleNamespace
@@ -382,3 +383,56 @@ def test_archive_preserves_multiple_review_audits_and_source_scope(stores: tuple
             assert hashlib.sha256(raw).hexdigest() == json.loads(archive.read("manifest.json"))["files"]["review_audit.jsonl"]["sha256"]
     finally:
         path.unlink()
+
+
+def test_startup_recovery_keeps_finished_clip_and_removes_only_temporaries(
+    stores: tuple[EvidenceStore, EventStore],
+) -> None:
+    store, _ = stores
+    finished = store.create(SOURCE, SESSION, "audio", START, 2000, 7000)
+    lost = store.create(SOURCE, SESSION, "video", START, 0, 5000)
+    # Power failed after the clip was linked into place but before its record update.
+    clip = store.root / f"{finished.evidence_id}.wav"
+    with wave.open(str(clip), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(48000)
+        output.writeframes(b"\0\0" * 48000 * 5)
+    damaged = store.create(SOURCE, SESSION, "video", START, 0, 5000)
+    (store.root / f"{damaged.evidence_id}.mp4").write_bytes(b"not a video")
+    temporaries = [
+        store.root / f".{finished.evidence_id}.0123.part.mp4",
+        store.root / ".audio-abc.wav",
+        store.root / "falcon-evidence-abc.zip",
+    ]
+    for path in temporaries:
+        path.write_bytes(b"temporary")
+    unrelated = store.root / "notes.txt"
+    unrelated.write_text("kept")
+    assert store.recover_pending() == 3
+    recovered = store.get(finished.evidence_id)
+    assert recovered.status == "partial" and recovered.duration_ms == 5000
+    assert (recovered.actual_start_ms, recovered.actual_end_ms) == (2000, 7000)
+    assert recovered.sha256 == hashlib.sha256(clip.read_bytes()).hexdigest()
+    assert store.get(lost.evidence_id).status == "failed"
+    # An unreadable file is never deleted, only left unlinked from a failed record.
+    assert store.get(damaged.evidence_id).status == "failed"
+    assert (store.root / f"{damaged.evidence_id}.mp4").exists()
+    assert not any(path.exists() for path in temporaries)
+    assert unrelated.read_text() == "kept"
+
+
+def test_export_refuses_when_it_would_consume_the_capture_reserve(
+    stores: tuple[EvidenceStore, EventStore], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections import namedtuple
+
+    from app.services import evidence_export
+
+    store, _ = stores
+    available(store)
+    usage = namedtuple("usage", "total used free")
+    monkeypatch.setattr(evidence_export.shutil, "disk_usage", lambda _: usage(10**9, 10**9, 100))
+    with pytest.raises(evidence_export.InsufficientExportSpace):
+        build_evidence_archive(store)
+    assert not list(store.root.glob("falcon-evidence-*.zip"))

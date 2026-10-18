@@ -171,3 +171,20 @@ def test_admin_tunnel_cannot_submit_sensor_data_even_with_token(tmp_path: Path) 
         )
         assert response.status_code == 403
         assert app.state.sensors.history().total == 0
+
+
+def test_rain_plate_wetness_requires_schema_1_1_and_reaches_event_snapshots(tmp_path: Path) -> None:
+    with pytest.raises(ValidationError, match="schema version 1.1"):
+        reading("wet-old-schema", surface_wet=True)
+    with pytest.raises(ValidationError):
+        reading("wet-not-boolean", schema_version="1.1", surface_wet="yes")
+    sensors = provider(tmp_path)
+    # A rain-only reading is a real measurement on its own.
+    rain_only = SensorReadingWrite.model_validate({
+        "schema_version": "1.1", "reading_id": "rain-1", "sensor_id": "node-1",
+        "observed_at": TIME, "surface_wet": True,
+    })
+    save(sensors, rain_only)
+    snapshot = sensors.snapshot(TIME + timedelta(seconds=10))
+    assert snapshot.surface_wet is True and snapshot.temperature_c is None
+    assert sensors.history().readings[0].surface_wet is True

@@ -22,6 +22,7 @@ const reviewLabels = {
   corrected: "Corrected",
   unknown: "Uncertain",
   false_positive: "Rejected",
+  discarded: "Discarded",
 };
 
 export default function ObservationHistory({

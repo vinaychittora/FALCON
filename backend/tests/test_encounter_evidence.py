@@ -42,6 +42,7 @@ class Recorder:
         self.actions = []
         self.pins = set()
         self.requests = []
+        self.starts = []
         self.pin_error = self.release_error = self.request_error = False
 
     def pin(self, frame):
@@ -52,11 +53,12 @@ class Recorder:
         self.pins.add(token)
         return token
 
-    def request(self, token, evidence_id):
+    def request(self, token, evidence_id, *, start_ms=None):
         if self.request_error:
             raise OSError("fixture queue unavailable")
         assert token in self.pins
         self.requests.append((token, evidence_id))
+        self.starts.append(start_ms)
 
     def release(self, token):
         self.actions.append(("release", token))
@@ -317,3 +319,17 @@ def test_disk_full_keeps_audio_observation_and_marks_evidence_failed(capture, mo
     assert capture.events.read(SOURCE)[0].event_id == event.event_id
     assert capture.encounter.metrics()["evidence_error"]
     assert not list(capture.store.root.glob("*.wav"))
+
+
+def test_lingering_animal_gets_contiguous_not_overlapping_clips(capture):
+    # One animal visible for 12 s at 2 fps.
+    for timestamp in range(4000, 16000, 500):
+        event = visual(timestamp)
+        capture.events.append(event)
+        with capture.encounter.frame_context(frame(timestamp)):
+            capture.encounter.visual(event)
+    windows = sorted(
+        (record.requested_start_ms, record.requested_end_ms) for record in capture.store.list()
+    )
+    assert windows == [(2000, 7000), (7000, 10000), (10000, 13000), (13000, 16000)]
+    assert capture.recorder.starts == [start for start, _ in windows]

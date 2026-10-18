@@ -13,12 +13,13 @@ export interface Taxon {
 }
 export interface TaxaCache {
   taxa: Taxon[];
+  place_name?: string;
   counts: Record<string, number>;
   refreshed_at: string | null;
   refreshing: boolean;
   error: string | null;
   version: string;
-  limits: Record<string, number>;
+  limits: Record<string, number | null>;
   minimum_observations: number;
   coverage?: Record<
     string,
@@ -81,7 +82,7 @@ export default function Taxa() {
             {data?.refreshed_at
               ? new Date(data.refreshed_at).toLocaleString()
               : "never"}{" "}
-            · Rajasthan records from iNaturalist
+            · {data?.place_name ?? "Local"} records from iNaturalist
           </p>
         </div>
         <button disabled={data?.refreshing} onClick={() => void refresh()}>
@@ -161,7 +162,7 @@ export default function Taxa() {
         <summary>Taxonomy provenance and coverage</summary>
         <p>
           {data?.coverage_basis ??
-            "Rajasthan research-grade photo observations; active species only"}
+            "Local research-grade photo observations; active species only"}
           . This is a candidate list, not a complete biodiversity inventory. A
           species being listed does not mean the models will always detect or
           identify it.

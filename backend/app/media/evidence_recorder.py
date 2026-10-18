@@ -67,6 +67,9 @@ class _Pin:
     error: str | None = None
     evidence_id: str | None = None
     queued: bool = False
+    # A continuation clip starts where the previous clip ended, so it is shorter
+    # by design; only missing stream coverage makes a clip partial.
+    expected_seconds: float = 5.0
 
 
 class EvidenceRecorder:
@@ -270,7 +273,8 @@ class EvidenceRecorder:
             self._pins[pin.identity] = pin
             return pin.identity
 
-    def request(self, pin_id: str, evidence_id: str) -> None:
+    def request(self, pin_id: str, evidence_id: str, *, start_ms: int | None = None) -> None:
+        """Queue a pinned interval; start_ms (session time) trims a continuation clip."""
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", evidence_id):
             raise ValueError("Invalid evidence ID")
         failure = None
@@ -286,6 +290,11 @@ class EvidenceRecorder:
                 failure = "The capture interval is no longer available."
             else:
                 pin.evidence_id = evidence_id
+                if start_ms is not None:
+                    start = pin.source_time - (pin.session_ms - start_ms) / 1000
+                    if pin.start < start < pin.end:
+                        pin.expected_seconds = pin.end - start
+                        pin.start = start
                 self._queue_if_ready(pin)
         if failure:
             self._complete(evidence_id, self._failed(failure))
@@ -470,7 +479,7 @@ class EvidenceRecorder:
                     digest.update(block)
             complete = (
                 start <= pin.start + 0.001 and end >= pin.end - 0.001
-                and end - start >= 4.999
+                and end - start >= pin.expected_seconds - 0.001
             )
             return {
                 "status": "ready" if complete else "partial",

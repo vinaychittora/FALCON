@@ -1,184 +1,148 @@
 # FALCON
 
-**Field Acoustic, Lens & Climate Observation Node**
-Developed by **Vinay Chittora**.
+**Field Acoustic, Lens & Climate Observation Node** — wildlife monitoring with a camera,
+microphones and weather sensors, analyzed locally.
 
-FALCON monitors a location through live camera, audio and environmental measurements.
-A Raspberry Pi acquires camera, microphone and sensor data; a separate GPU computer
-runs inference and the web interface over a wired or wireless local connection.
-It combines generic animal detection, regional species candidates, independent
-bird-call detection and human review. Media, observations and camera credentials stay local.
-Uploaded photographs, recordings and audio are a separate development/testing workspace.
+FALCON watches a place for animals. A **sensor node** (a Raspberry Pi with a camera,
+microphones, a temperature/humidity/pressure sensor and a rain plate) streams what it sees
+and hears. An **inference node** (a PC, mini PC or laptop) finds animals in the video,
+suggests the species, identifies bird calls, saves a short clip of each visit and records
+the weather at that moment. You check the results in a web page, correct them with one
+click, and export a clean dataset in the Camtrap DP standard for researchers.
 
-This is an experimental scientific observation tool. Model suggestions require review;
-similarity scores are not calibrated probabilities and detections are not animal counts.
+Everything runs on your own hardware. No video, sound or records go to a cloud service.
 
-## Install on Linux
+```mermaid
+flowchart LR
+  subgraph node[Sensor node: Raspberry Pi]
+    cam[Camera Module 3] --> stream[RTSP stream]
+    mic[Audio HAT microphones] --> stream
+    bme[BME280 weather] --> queue[Readings queue]
+    rain[Rain plate] --> queue
+  end
+  subgraph inference[Inference node: PC or mini PC]
+    falcon[FALCON] --> md[MegaDetector + BioCLIP: animals and species]
+    falcon --> bn[BirdNET: bird calls]
+    falcon --> db[(Observations, clips, weather)]
+    db --> ui[Web interface: live, review, export]
+  end
+  falcon -- reads stream --> stream
+  falcon -- control and readings, signed --> queue
+```
 
-The scripted installer supports **Linux x86-64**, including Ubuntu under WSL2.
-Jetson/ARM64 packaging is not yet validated; see [installation and Jetson status](docs/INSTALLATION.md).
-Prerequisites: Git, Bash, curl, make, tar, working TLS certificates and internet for setup/downloads.
+The two can sit side by side at a remote site (one Ethernet cable, no internet needed), or
+apart: the node in the garden and the computer indoors on the home network.
+
+## What it does
+
+- **Live view** with detection boxes, and a feed of animal visits you can confirm, correct,
+  mark unsure, reject or discard while they happen (keyboard shortcuts included).
+- **Review** by time window, species, status, session and score; one decision covers all
+  frames of a visit; bulk actions; every decision is audited, model output is never overwritten.
+- **Sensor node control** from the web page: start/stop the stream, switch the camera,
+  microphone, weather sensor and rain plate on or off, focus, exposure, white balance, HDR,
+  resolution and more, node health (temperature, power, storage, Wi-Fi, clock), restart.
+- **Evidence**: a 5-second video clip per visit and a WAV clip per bird call, with crops and
+  spectrograms on every review card. No continuous recording.
+- **Weather** every 30 seconds, attached to each detection, kept even when the network drops.
+- **Export** a time window as a Camtrap DP 1.0 package (GBIF, Agouti, Wildlife Insights,
+  R `camtrapdp`), with verified-only, verified-plus-unreviewed or everything-but-discarded.
+- **Unattended**: starts after a power cut, reconnects, sets the node's clock when there is
+  no internet, restarts a stalled analysis.
+- **Media tests**: try it on any photo, video or sound recording.
+- Private remote access through Tailscale.
+
+## Quick start
+
+### 1. Inference node (the computer that runs FALCON)
+
+Linux x86-64 or Windows with WSL2 Ubuntu. An NVIDIA GPU is used if present.
 
 ```bash
 git clone https://github.com/vinaychittora/FALCON.git
 cd FALCON
-make install
-make taxa
-make start
+make install          # Python, Node, FFmpeg and dependencies, inside this folder
+make taxa             # species list for your region, see below
+make start            # then open http://127.0.0.1:8000
 ```
 
-Open **http://127.0.0.1:8000**. Production serves the interface and API together; Vite is not required.
+`make taxa` builds the list of species FALCON chooses from, using iNaturalist research-grade
+records. The default region is Rajasthan, India. For your region:
+`make taxa ARGS='--place "Kerala, India"'` (any iNaturalist place name or ID); add
+`--include-domestic` to label livestock and pets correctly. Details: [docs/INSTALL.md](docs/INSTALL.md).
 
-```bash
-make status
-make stop
-# Optional Linux application-menu shortcut:
-bash scripts/install.sh --skip-setup --desktop
-```
+### 2. A sensor
 
-Chrome/Edge can also install a standalone app window using **Install app** when offered,
-or the browser installation menu. The local server must still run. Only a generic offline
-help page is cached by the service worker; no recordings, credentials or observations.
+You need at least one sensor. Any of these works:
 
-Setup installs user-local Python 3.11, Node, FFmpeg and locked dependencies in this folder.
-It does not change graphics drivers or system Python. CPU inference is supported, but the
-current package includes CUDA libraries and is a substantial download. An NVIDIA GPU is
-useful for larger classifiers. Keep the folder on a Linux filesystem under WSL.
-
-## Features
-
-- Separate temporary Media tests for photo/video/audio analysis.
-- Timestamped boxes, species candidates and independent acoustic detections.
-- RTSP camera monitoring with encrypted saved credentials.
-- Five-second encounter video clips and separate acoustic WAV clips, with bounded rolling buffers.
-- Reviewable saved evidence and portable CSV/JSONL/media archives with SHA-256 checksums.
-- Pause/resume across restarts, preserving completed visual work and reviews.
-- Human correction/rejection without replacing original model evidence.
-- Spelling-tolerant search of common and scientific names.
-- Source codec, frame rate, bitrate, timing and memory diagnostics.
-- Live camera/audio health, sensor freshness and current CPU/GPU/RAM/storage measurements.
-- Live-only field history with occurrence date/time, evidence playback and review audit.
-- Independent periodic sensor history and event-time readings with age/quality status.
-- Optional boot service and automatic observation of the saved camera.
-- Private Tailscale admin access, with an explicit login allowlist and share address.
-
-Sensor history and authenticated local ingestion are implemented. Physical Pi sensor
-drivers and capture provisioning still need hardware acceptance. No sensor readings
-are simulated; uploaded tests never inherit current environmental readings.
-See the [node and sensor contract](docs/SENSORS.md).
-
-## Use
-
-1. Open **Monitor**, enter the camera RTSP URL and separate local credentials, save and start.
-2. Open **Observations** for live records, video/audio evidence, corrections and sensor history.
-3. Use **Media tests** for uploaded development samples; these are excluded from field records.
-4. **Pause analysis** saves progress and frees the engine. **Resume** keeps the run's saved
-   settings; **Analyze again** starts a new run with the current settings.
-5. **System → Live status** shows the current camera/audio inputs, inference delays,
-   saved-evidence counts, sensor freshness and processing computer health. Configure
-   models, thresholds and ROI in **System → Configuration**.
-6. Open a live record in **Observations** to play its saved clip. **Export evidence** downloads
-   field records and retained media for the selected camera session or all live sessions.
-
-Uploads use `data/samples/`. Local uploads have no application byte-size limit;
-available disk space still applies. Upload directly on the device, or copy files there
-and rescan. Remote uploads are disabled. Supported formats include MP4, MOV, MKV, AVI, WebM, MTS, JPEG, PNG, WebP, WAV, MP3,
-FLAC, M4A, OGG and AAC. Images are limited to 40 MP. Animated images and external-reference
-playlists are rejected. Browser playback depends on codec support.
-
-Resume preserves completed visual frames and reviews. An incomplete audio stage restarts.
-Source or taxonomy changes can invalidate a checkpoint. One inference job runs at a time.
-Recorded runtime/peak GPU memory update on pause or completion; other metrics update during work.
-File-run diagnostics are under **Media tests → Selected test · analysis diagnostics**.
-Live host measurements are separate from those recorded peaks. Under WSL, CPU and RAM
-describe the Linux environment; GPU readings describe the shared physical GPU.
-Read [operation, backup and troubleshooting](docs/OPERATIONS.md).
-
-## Models and taxonomy
-
-MegaDetector generates animal proposals. **BioCLIP 2**, **BioCLIP 2.5 Huge**, or an
-independent cross-check of both suggests species. Cross-check requires both models to
-pass their own score/margin checks and agree; disagreement stays uncertain. Scores are
-not averaged. **BirdNET** processes audio on CPU independently: a bird heard nearby does
-not establish the identity of an animal in a visual box.
-
-`make taxa` builds a regional candidate list from aggregate public iNaturalist taxonomy
-queries. The default is Rajasthan, India, not a complete Indian species inventory.
-Larger models do not automatically enlarge this list. Setup downloads no training-image dataset.
-
-First use downloads the detector (about 119 MB), the selected BioCLIP weights (about
-1.71 GB or 3.94 GB), and BirdNET (about 224 MB) when enabled. Subsequent runs reuse caches.
-Small, distant or occluded organisms can be missed, and confidently wrong suggestions are possible.
-
-Weights have separate licenses, including noncommercial restrictions for BirdNET.
-Read [model licenses](docs/model-licenses.md) before redistribution or commercial use.
-
-## Local data and security
-
-FALCON binds to **127.0.0.1 only** and checks browser origins and request hosts.
-Optional **Tailscale Serve** access verifies the exact private hostname and approved
-Tailscale user identity. Use **System → Device access** after the one-time device setup.
-Do not use a public tunnel, anonymous proxy, port forwarding or a wildcard bind address.
-See [remote access and SSH](docs/REMOTE_ACCESS.md) and [appliance startup](docs/APPLIANCE.md).
-
-| Location | Contents |
+| You have | Do this |
 | --- | --- |
-| `data/falcon.sqlite3` | Observations, jobs, reviews, media metadata, camera profile |
-| `data/samples/` | Original media |
-| `data/evidence/` | Retained MP4/WAV encounter clips; never include in source releases |
-| `data/settings.json` | Saved settings and optional approximate site location |
-| `data/private/camera.key` | Key for saved camera-password encryption |
-| `models/` | Model and embedding caches |
-| `.env` | Optional local defaults; copy `.env.example` |
+| **The FALCON Pi node** (camera, microphones, weather, rain) | Write Raspberry Pi OS Lite with Raspberry Pi Imager, then run `python3 node/sdcard/prepare_sdcard.py <bootfs drive>`. Put the card in the Pi: it installs itself and starts streaming. Or run `sudo bash node/install.sh` on the Pi. |
+| A Raspberry Pi with only some of the parts | Same as above: the node finds what is attached. A weather-only or microphone-only node works too. |
+| A Linux computer with a USB webcam or microphone | `sudo bash node/install.sh` on that computer: it becomes a sensor node. |
+| An IP camera (RTSP), e.g. TP-Link Tapo | FALCON → **Sensors** → *IP camera*: enter its stream address and account. |
 
-Camera passwords are never returned by the API. Encryption protects a database copy,
-but someone with both the database and key can decrypt it. The runtime directory is
-private to the operating-system user. Field observations and evidence are retained;
-temporary Media tests have a separate session lifecycle. Existing historical test
-data is preserved. See the [operations guide](docs/OPERATIONS.md).
+Then in FALCON open **Sensors → Add sensor node**, enter the node's address and the pairing
+key printed by its installer, and press **Start observing** on **Live**.
+Full guide: [docs/SENSOR_NODE.md](docs/SENSOR_NODE.md).
 
-Do not publish media, EXIF metadata, observations, keys, backups, environment files or
-local validation reports. A `.gitignore` cannot remove private content from old commits.
-See [security](SECURITY.md) and the [clean public-release workflow](docs/PUBLIC_RELEASE.md).
+### 3. Build the node hardware
 
-## Development and checks
+The [node build handbook](docs/handbooks/FALCON-Node-Build-Handbook.pdf) explains the parts,
+wiring, power (USB-C or PoE), 3D-printed enclosure and assembly step by step. Printable
+STL/STEP files, drawings and the parametric CAD model are in [hardware/](hardware/).
+
+## Documentation
+
+All of these are also inside FALCON: open **Help** in the menu (with search across every guide).
+
+| Guide | For |
+| --- | --- |
+| [User guide](docs/USER_GUIDE.md) | Using the web interface: Live, Review, Sensors, Export |
+| [Inference node install](docs/INSTALL.md) | Installing, auto-start, updates, WSL |
+| [Sensor node](docs/SENSOR_NODE.md) | Setting up and connecting the Raspberry Pi node |
+| [Node build handbook (PDF)](docs/handbooks/FALCON-Node-Build-Handbook.pdf) | Building the node hardware |
+| [Data export](docs/DATA_EXPORT.md) | The Camtrap DP package and how fields are mapped |
+| [Operations](docs/OPERATIONS.md) | Where data is kept, backups, troubleshooting |
+| [Architecture](docs/ARCHITECTURE.md) | How the parts fit together; APIs |
+| [Remote access](docs/REMOTE_ACCESS.md) · [Security](SECURITY.md) | Private access and the trust model |
+| [Model licenses](docs/model-licenses.md) | Licenses of the models (BirdNET is non-commercial) |
+
+## How the identification works
+
+MegaDetector finds animals, people and vehicles in sampled frames (2 per second by
+default). A tracker follows each animal. BioCLIP 2 or BioCLIP 2.5 compares the best crops of
+a track with the names on the local species list; a cross-check mode needs both models to
+agree. BirdNET listens to 9-second sound windows on the CPU, filtered to the local bird list
+and, if the site location is set, to the date and place. People and vehicles are not saved
+as animals.
+
+The scores rank candidates; visual similarity is not a probability, and a visit is not a
+count of individuals. Treat unreviewed results as suggestions. Small, distant or hidden
+animals can be missed. The first analysis downloads about 2–4 GB of model weights.
+
+## Development
 
 ```bash
-make setup
-make dev
-make test
-make lint
-make build
+make dev        # interface on http://127.0.0.1:5173 with live reload, API on :8000
+make test       # backend, sensor node and interface tests
+make lint       # ruff, mypy, eslint
+make build      # production interface
 ```
 
-Development uses port 5173 for the interface and 8000 for the API. Stop development before
-starting production. The installer refuses dependency updates while a server is running.
+Python 3.11 (FastAPI, PyTorch, PyAV) for the inference node, standard-library Python 3.11+
+for the sensor node, React + TypeScript for the interface, SQLite for storage.
 
-```bash
-source scripts/env.sh
-python scripts/benchmark.py /path/to/local-video.mp4 --device cpu --seconds 4
-python scripts/build_rajasthan_taxa.py --help
-```
+## Status
 
-Benchmarks and test media remain local. Regression tests cover service boundaries, media
-handling, reviews and resumable work; they do not establish species accuracy.
-See [code review](docs/CODE_REVIEW.md) and [architecture](docs/architecture.md).
-The [requirements checklist](docs/REQUIREMENTS.md) records implemented features and remaining hardware work.
+The inference node, interface and sensor-node software are complete and tested on a Linux PC
+with a live IP camera and a simulated node stream. The Raspberry Pi node has been designed
+and its software tested off the Pi; the first run on the assembled hardware (camera, audio HAT
+and sensors) is the next acceptance step. Jetson packaging is not done yet.
 
-## Limits and credits
-
-This is not yet a validated unattended field appliance. Jetson packaging, sustained field
-operation, sensor integration and species-accuracy evaluation remain separate work.
-Corrections do not automatically retrain a model. New live sessions retain encounter clips;
-older sessions cannot recover discarded footage. Video clips are silent; acoustic detections
-retain separate WAV clips. This does not establish audiovisual synchronization. Annotated
-video and persistent crop export are not implemented.
-
-See [field deployment](docs/FIELD_DEPLOYMENT.md) for an outdoor Pi camera/microphone/sensor
-node with either an indoor server or a standalone wired inference unit. The Pi capture
-installer and physical sensor drivers remain to be built and tested on the selected hardware.
-The [data export guide](docs/DATA_EXPORT.md) documents portable archives and the metadata
-needed before a validated Camtrap DP export can be added.
+## License and credits
 
 Application code: [Apache 2.0](LICENSE). Developer: **Vinay Chittora**.
-Third-party libraries, models and taxonomy retain their own attribution and licenses.
+The models (MegaDetector, BioCLIP, BirdNET), MediaMTX, the Waveshare audio HAT mixer file
+and iNaturalist taxonomy keep their own licenses and attribution; see
+[docs/model-licenses.md](docs/model-licenses.md) and [NOTICE](NOTICE).

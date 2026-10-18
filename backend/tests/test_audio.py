@@ -134,3 +134,59 @@ def test_subprocess_cancel_terminates_process_group(tmp_path: Path) -> None:
     # A short-lived zombie is already terminated and may await init's reap.
     assert not psutil.pid_exists(pid) or psutil.Process(pid).status() == psutil.STATUS_ZOMBIE
     assert pid != os.getpid()
+
+
+def test_live_pcm_windows_skip_conversion_and_labels_are_prepared_once(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    import wave
+    from threading import Event
+
+    from app.config import Settings
+    from app.inference import birdnet
+
+    config = Settings(data_dir=tmp_path, debug_audio=True)
+    config.prepare()
+    analyzer = birdnet.BirdNET(config)
+    analyzer.executable = tmp_path / "fake-executable"
+    analyzer.executable.touch()
+    commands: list[str] = []
+
+    def run(command, log, cancel, env=None, timeout=600):
+        commands.append(Path(command[1]).name if "birdnet_prepare" in command[1] else "analyze")
+        if "birdnet_prepare" in command[1]:
+            Path(command[-1]).write_text("Pycnonotus cafer_Red-vented Bulbul\n")
+        else:
+            output = Path(command[command.index("-o") + 1])
+            (output / "window.BirdNET.results.csv").write_text(
+                "Start (s),End (s),Scientific name,Common name,Confidence\n"
+                "0.0,3.0,Pycnonotus cafer,Red-vented Bulbul,0.9\n"
+            )
+        return 0.0
+
+    def no_conversion(*args, **kwargs):
+        raise AssertionError("48 kHz mono PCM must not be converted again")
+
+    monkeypatch.setattr(birdnet, "run_cancellable", run)
+    monkeypatch.setattr(birdnet, "extract_audio", no_conversion)
+    window = tmp_path / "window.wav"
+    with wave.open(str(window), "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(48000)
+        output.writeframes(b"\0\0" * 48000 * 3)
+    original = window.read_bytes()
+    taxa = TaxaCache(taxa=[Taxon(
+        taxon_id=1, scientific_name="Pycnonotus cafer", group="Aves", iconic_group="Aves",
+        observation_count=5,
+    )])
+    video = Video(source_id="a" * 24, filename="live", duration_ms=3000, width=0, height=0,
+                  fps=0, codec="pcm_s16le", audio=True, size_bytes=len(original))
+    for _ in range(3):
+        events, _ = analyzer.analyze(
+            window, video, "live", AnalysisSettings(), taxa, Event(), lambda _: None
+        )
+        assert [event.scientific_name for event in events] == ["Pycnonotus cafer"]
+    assert commands == ["birdnet_prepare.py", "analyze", "analyze", "analyze"]
+    # DEBUG_AUDIO must never move the caller's original file.
+    assert window.read_bytes() == original

@@ -64,6 +64,8 @@ class RTSPSource:
         self.decoded_audio_frames = 0
         self.audio_discontinuities = 0
         self.reconnects = 0
+        # A microphone-only source (a sensor node without a camera) has no video stream.
+        self.audio_only = False
         self.audio_reconnects = 0
         self.audio_transport_mode = "audio-only"
         self.audio_stage = "waiting for connection"
@@ -208,6 +210,24 @@ class RTSPSource:
             timeout=(5.0, 5.0),
         )
 
+    def _audio_only_stream(self) -> bool:
+        try:
+            with self.open_container(
+                self._url, mode="r", options={"rtsp_transport": "tcp", "rw_timeout": "5000000"},
+                timeout=(5.0, 5.0),
+            ) as container:
+                return not container.streams.video and bool(container.streams.audio)
+        except Exception:
+            return False
+
+    def _run_audio_only(self) -> None:
+        """A microphone-only source: sound keeps its own subscription and reconnection loop."""
+        with self.condition:
+            self.audio_only = True
+            self.condition.notify_all()
+        self.status("live", None)
+        self.cancel.wait()
+
     def run(self) -> None:
         failures = 0
         # Native diagnostics can contain camera credentials. Python Capture does
@@ -226,8 +246,21 @@ class RTSPSource:
             while not self.cancel.is_set():
                 self.status("connecting" if not self.reconnects else "reconnecting", None)
                 try:
-                    with self._open("video") as container:
+                    try:
+                        container = self._open("video")
+                    except av.error.HTTPUnauthorizedError:
+                        raise
+                    except Exception:
+                        # RTSP servers refuse a video-only setup when the stream has no video.
+                        if self.audio_enabled and self._audio_only_stream():
+                            self._run_audio_only()
+                            return
+                        raise
+                    with container:
                         if not container.streams.video:
+                            if self.audio_enabled:
+                                self._run_audio_only()
+                                return
                             self.status("failed", "The camera did not provide a video stream")
                             self.cancel.set()
                             return

@@ -87,7 +87,7 @@ class ModelRegistry:
                     )
                 self.classifier = BioCLIPEnsemble(models) if len(models) > 1 else models[0]
                 self.memory("after_classifier_mb")
-            message(f"Preparing text embeddings for {len(taxa.taxa)} Rajasthan taxa")
+            message(f"Preparing text embeddings for {len(taxa.taxa)} local taxa ({taxa.place_name})")
             self.classifier.prepare_taxa(taxa, config.prompt_templates)
             self.memory("after_embeddings_mb")
             return self.detector, self.classifier

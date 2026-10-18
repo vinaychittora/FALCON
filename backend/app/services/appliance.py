@@ -2,10 +2,12 @@
 
 import threading
 import time
+from typing import Any
 
-from pydantic import BaseModel, ConfigDict, SecretStr
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
 from app.config import Settings
+from app.nodes.client import NodeError
 from app.schemas_live import LiveStart
 from app.services.configuration import load_analysis_settings
 from app.services.live import LiveService
@@ -16,6 +18,8 @@ from app.taxonomy.cache import atomic_json
 class AppliancePreferences(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     auto_observe: bool = False
+    # "camera" (the saved IP camera) or "node:<node id>" (a paired FALCON sensor node).
+    source: str = Field(default="camera", pattern=r"^(camera|node:[A-Za-z0-9][A-Za-z0-9_.:-]{0,99})$")
 
 
 class ApplianceStatus(BaseModel):
@@ -23,6 +27,8 @@ class ApplianceStatus(BaseModel):
     camera_saved: bool
     state: str
     message: str
+    source: str = "camera"
+    source_name: str | None = None
 
 
 class ApplianceService:
@@ -30,11 +36,15 @@ class ApplianceService:
         self, settings: Settings, cameras: CameraStore, live: LiveService,
         *, attempts: int = 3, connect_timeout: float = 30, retry_delay: float = 5,
         retry_max_delay: float = 300, stable_seconds: float = 60,
+        stall_seconds: float = 180, auth_retry_seconds: float = 900, nodes: Any = None,
     ):
-        self.settings, self.cameras, self.live = settings, cameras, live
+        self.settings, self.cameras, self.live, self.nodes = settings, cameras, live, nodes
         self.path = settings.data_dir / "private" / "appliance.json"
         self.attempts, self.connect_timeout, self.retry_delay = attempts, connect_timeout, retry_delay
         self.retry_max_delay, self.stable_seconds = retry_max_delay, stable_seconds
+        # An unattended box must recover from a frozen pipeline and, slowly, from a
+        # camera that rejected its credentials while booting or being reconfigured.
+        self.stall_seconds, self.auth_retry_seconds = stall_seconds, auth_retry_seconds
         self._mutex = threading.RLock()
         self._cancel = threading.Event()
         self._preserve_live_on_cancel = False
@@ -42,18 +52,58 @@ class ApplianceService:
         self._owned_session: str | None = None
         self._observing_session: str | None = None
         self._enabled = False
+        self._source = "camera"
         self._state = "disabled"
         self._message = "Automatic observation is off."
         if self.path.exists():
             try:
-                self._enabled = AppliancePreferences.model_validate_json(
-                    self.path.read_text()
-                ).auto_observe
+                preferences = AppliancePreferences.model_validate_json(self.path.read_text())
+                self._enabled, self._source = preferences.auto_observe, preferences.source
                 if self._enabled:
                     self._state = "scheduled"
-                    self._message = "The saved camera will start when FALCON next starts."
+                    self._message = f"{self._source_label()} will start when FALCON next starts."
             except (OSError, ValueError):
                 self._message = "Automatic observation settings could not be read; startup is disabled."
+
+    def _node_id(self) -> str | None:
+        return self._source.split(":", 1)[1] if self._source.startswith("node:") else None
+
+    def _source_name(self) -> str | None:
+        node_id = self._node_id()
+        if node_id is None:
+            profile = self.cameras.public()
+            return profile.name if profile.saved else None
+        try:
+            return str(self.nodes.store.get(node_id).name) if self.nodes is not None else None
+        except KeyError:
+            return None
+
+    def _source_label(self) -> str:
+        if self._node_id() is None:
+            return "The saved camera"
+        name = self._source_name()
+        return f"Sensor node {name}" if name else "The selected sensor node"
+
+    def _request(self) -> LiveStart:
+        config = load_analysis_settings(self.settings)
+        node_id = self._node_id()
+        if node_id is not None:
+            if self.nodes is None:
+                raise KeyError(node_id)
+            status = self.nodes.ensure_streaming(node_id)
+            self.nodes.observing = node_id
+            request: LiveStart = self.nodes.live_request(node_id, config, status)
+            return request
+        profile = self.cameras.public()
+        if not profile.saved:
+            raise KeyError("camera")
+        request = LiveStart(
+            name=profile.name, url=SecretStr(profile.url),
+            username=SecretStr(profile.username) if profile.username else None,
+            config=config.model_copy(update={"audio_enabled": profile.audio_enabled}),
+            use_saved_credentials=True, save_profile=False,
+        )
+        return self.cameras.resolve(request)
 
     def status(self) -> ApplianceStatus:
         with self._mutex:
@@ -70,17 +120,26 @@ class ApplianceService:
                 camera_saved=self.cameras.public().saved,
                 state=self._state,
                 message=self._message,
+                source=self._source,
+                source_name=self._source_name(),
             )
 
     def configure(self, preferences: AppliancePreferences) -> ApplianceStatus:
-        if preferences.auto_observe and not self.cameras.public().saved:
+        if preferences.source.startswith("node:"):
+            try:
+                if self.nodes is None:
+                    raise KeyError(preferences.source)
+                self.nodes.store.get(preferences.source.split(":", 1)[1])
+            except KeyError:
+                raise ValueError("Pair this sensor node before choosing it for automatic observation.") from None
+        elif preferences.auto_observe and not self.cameras.public().saved:
             raise ValueError("Save a camera profile before enabling automatic observation.")
         with self._mutex:
             self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             self.path.parent.chmod(0o700)
             atomic_json(self.path, preferences.model_dump())
             self.path.chmod(0o600)
-            self._enabled = preferences.auto_observe
+            self._enabled, self._source = preferences.auto_observe, preferences.source
             if not self._enabled:
                 self._preserve_live_on_cancel = True
                 self._cancel.set()
@@ -88,12 +147,12 @@ class ApplianceService:
                 self._message = "Automatic observation is off. Any current observation can be stopped in Sources."
             elif self._cancel.is_set() or not self._worker or not self._worker.is_alive():
                 self._state = "scheduled"
-                self._message = "The saved camera will start when FALCON next starts."
+                self._message = f"{self._source_label()} will start when FALCON next starts."
         return self.status()
 
     def startup(self) -> None:
         with self._mutex:
-            if not self._enabled or self._worker and self._worker.is_alive():
+            if not self._enabled or (self._worker and self._worker.is_alive()):
                 return
             self._cancel = threading.Event()
             self._preserve_live_on_cancel = False
@@ -140,6 +199,10 @@ class ApplianceService:
                 self.live.stop(wait=True)
         self._observing_session = None
 
+    def _stuck_seconds(self) -> float:
+        stuck = getattr(self.live, "stuck_for", None)
+        return float(stuck()) if callable(stuck) else 0.0
+
     def _retry_seconds(self, failures: int) -> float:
         # A stream that briefly connects then crashes must not reset the delay.
         # Clamp even programmatic overrides so recovery never busy-spins.
@@ -158,23 +221,27 @@ class ApplianceService:
                         "suspended", "The analysis engine is in use. Automatic startup was skipped."
                     )
                     return
-                profile = self.cameras.public()
-                if not profile.saved:
-                    self._state_change("failed", "The saved camera profile is unavailable.")
-                    return
                 try:
-                    request = LiveStart(
-                        name=profile.name, url=SecretStr(profile.url),
-                        username=SecretStr(profile.username) if profile.username else None,
-                        config=load_analysis_settings(self.settings).model_copy(
-                            update={"audio_enabled": profile.audio_enabled}
-                        ),
-                        use_saved_credentials=True, save_profile=False,
+                    request = self._request()
+                except KeyError:
+                    self._state_change(
+                        "failed", "The saved camera profile is unavailable." if self._node_id() is None
+                        else "The selected sensor node is no longer paired."
                     )
-                    request = self.cameras.resolve(request)
+                    return
+                except NodeError as exc:
+                    # A node that is still booting or out of range: retry like a camera outage.
+                    failures += 1
+                    if not ever_connected and failures >= self.attempts:
+                        self._state_change("failed", f"The sensor node did not become available: {exc}")
+                        return
+                    delay = self._retry_seconds(failures)
+                    self._state_change("waiting", f"Waiting for the sensor node ({exc}). Retrying in {delay:g} seconds.")
+                    self._cancel.wait(delay)
+                    continue
                 except Exception:
                     self._state_change(
-                        "failed", "The saved camera or analysis settings could not be loaded. Check them in System and Sources."
+                        "failed", "The saved camera or analysis settings could not be loaded. Check them in System and Sensors."
                     )
                     return
                 self._state_change(
@@ -186,9 +253,14 @@ class ApplianceService:
                 try:
                     started = self.live.start(request)
                 except RuntimeError:
-                    self._state_change(
-                        "suspended", "The analysis engine is in use. Automatic startup was skipped."
-                    )
+                    if self._stuck_seconds() > 0:
+                        self._state_change(
+                            "failed", "A stalled analysis did not stop. Restart FALCON; the boot service restarts it automatically."
+                        )
+                    else:
+                        self._state_change(
+                            "suspended", "The analysis engine is in use. Automatic startup was skipped."
+                        )
                     return
                 except Exception:
                     self._state_change(
@@ -198,6 +270,7 @@ class ApplianceService:
                 self._owned_session = started.session_id
                 deadline = time.monotonic() + self.connect_timeout
                 waiting = False
+                authentication_failed = False
                 stable_since: float | None = None
                 while not self._cancel.is_set():
                     state = self.live.state()
@@ -216,11 +289,12 @@ class ApplianceService:
                     else:
                         stable_since = None
                     if state.status == "failed":
-                        if "authentication failed" in (state.error or "").casefold():
-                            self._state_change(
-                                "failed", "Camera authentication failed. Check its saved local account in Sources; automatic retries have stopped."
-                            )
-                            return
+                        authentication_failed = "authentication failed" in (state.error or "").casefold()
+                        break
+                    if self._stuck_seconds() >= self.stall_seconds:
+                        self._state_change(
+                            "waiting", "Analysis stopped making progress. Restarting the camera session."
+                        )
                         break
                     if state.status in {"stopping", "stopped", "idle"}:
                         # A stop is a control action, not a recoverable crash.
@@ -239,6 +313,14 @@ class ApplianceService:
                 if self._cancel.is_set():
                     return
                 self._stop_owned_attempt()
+                if authentication_failed:
+                    minutes = max(1, round(self.auth_retry_seconds / 60))
+                    self._state_change(
+                        "waiting", "Camera authentication failed. Check the saved local account in Sources; "
+                        f"FALCON will try again in {minutes} minutes."
+                    )
+                    self._cancel.wait(self.auth_retry_seconds)
+                    continue
                 failures += 1
                 if not ever_connected and failures >= self.attempts:
                     self._state_change(

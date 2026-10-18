@@ -15,10 +15,8 @@ def list_taxa(request: Request) -> TaxaCache:
 @router.post("/refresh", status_code=202)
 def refresh_taxa(body: RefreshRequest, request: Request) -> dict[str, str]:
     service = request.app.state.taxa
-    if set(body.limits) - set(DEFAULT_LIMITS) or any(
-        v < 0 or v > 1000 for v in body.limits.values()
-    ):
-        raise HTTPException(422, "Use supported groups with limits from 0 to 1000")
+    if set(body.limits) - set(DEFAULT_LIMITS) or any(v is not None and v < 0 for v in body.limits.values()):
+        raise HTTPException(422, "Use supported groups with no limit, 0 or a positive count")
     if service.lock.locked():
         raise HTTPException(409, "Refresh already running")
 

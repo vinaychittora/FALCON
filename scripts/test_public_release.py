@@ -246,3 +246,40 @@ def test_public_base_requires_full_hash(tmp_path: Path) -> None:
     destination, base = seed_public_base_export(tmp_path)
     with pytest.raises(ReleaseError, match="complete Git commit hash"):
         verify_release(destination, public_base_commit=base[:8])
+
+
+def test_hash_pinned_hardware_files_and_handbooks_may_be_published(tmp_path: Path) -> None:
+    root = seed_source(tmp_path / "working")
+    extra = {
+        "hardware/FALCON-node-print-pack.zip": b"PK\x03\x04print pack",
+        "hardware/renders/exploded.png": b"\x89PNG\r\n\x1a\nrender",
+        "hardware/cad/stl/01_shell.stl": b"binary stl header\x00\x01",
+        "docs/handbooks/FALCON-User-Handbook.pdf": b"%PDF-1.7 handbook",
+    }
+    assets = json.loads((root / ASSETS).read_text())
+    for path, data in extra.items():
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        (root / path).write_bytes(data)
+        assets[path] = hashlib.sha256(data).hexdigest()
+    (root / ASSETS).write_text(json.dumps(assets))
+    (root / MANIFEST).write_text("\n".join(sorted({*(root / MANIFEST).read_text().split(), *extra})) + "\n")
+    _, findings = inspect_release(root)
+    assert findings == []
+    (root / "docs/handbooks/FALCON-User-Handbook.pdf").write_bytes(b"%PDF-1.7 changed")
+    _, findings = inspect_release(root)
+    assert [f.category for f in findings] == ["unreviewed_binary_asset"]
+    # A photo renamed to .pdf fails its signature even with a matching hash.
+    photo = b"\xff\xd8\xff\xe0 jpeg"
+    (root / "docs/handbooks/FALCON-User-Handbook.pdf").write_bytes(photo)
+    assets["docs/handbooks/FALCON-User-Handbook.pdf"] = hashlib.sha256(photo).hexdigest()
+    (root / ASSETS).write_text(json.dumps(assets))
+    _, findings = inspect_release(root)
+    assert [f.category for f in findings] == ["unreviewed_binary_asset"]
+
+
+def test_archives_and_manufacturer_documents_stay_out_elsewhere() -> None:
+    assert forbidden_path("backup.zip")
+    assert forbidden_path("docs/handbooks/notes.zip") is False
+    assert forbidden_path("hardware/manufacturer-references/camera.pdf")
+    assert forbidden_path("hardware/PARTS.md") is False
+    assert scan_content("hardware/renders/unlisted.png", b"\x89PNG\r\n\x1a\n")[0].category == "unapproved_binary"
