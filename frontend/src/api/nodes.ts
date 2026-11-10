@@ -14,6 +14,10 @@ export interface NodeComponent {
   resolutions?: string[];
   connected?: boolean;
   chip?: string;
+  /** Rain plate (watched twice a second): held 10 min after the last wet moment. */
+  raining?: boolean;
+  last_wet?: string | null;
+  wet_pulses_last_hour?: number;
 }
 
 export interface CameraSettings {

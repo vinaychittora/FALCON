@@ -44,6 +44,27 @@ export function sensorRoute(
 export const sensorHref = (nodeId: string, section: SensorSection) =>
   `#/sensors/${encodeURIComponent(nodeId)}/${section}`;
 
+/** "Raining · last wet 13:42 · 4 wet moments in the last hour" from the node's rain status. */
+export function rainDetail(rain: {
+  raining?: boolean;
+  last_wet?: string | null;
+  wet_pulses_last_hour?: number;
+}): string {
+  const parts: string[] = [];
+  if (rain.raining) parts.push("Raining");
+  parts.push(
+    rain.last_wet
+      ? `last wet ${new Date(rain.last_wet).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+      : "not wet since the node started",
+  );
+  if (rain.wet_pulses_last_hour)
+    parts.push(
+      `${rain.wet_pulses_last_hour} wet moment${rain.wet_pulses_last_hour === 1 ? "" : "s"} in the last hour`,
+    );
+  const text = parts.join(" · ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /** Which camera supplies the picture when observing this node; sound stays on the node. */
 function VideoSource({
   node,
