@@ -94,7 +94,9 @@ def _sound_derivative(request: Request, evidence_id: str, kind: Literal["clean",
         raise HTTPException(404, "Evidence media is unavailable") from exc
     if record.media_kind != "audio":
         raise HTTPException(400, "Only sound clips can be cleaned")
-    target = source.with_name(f"{source.stem}.{'clean.wav' if kind == 'clean' else 'spectrogram.png'}")
+    # The version in the name makes an improved cleaning apply to every clip at once
+    # (v2, 10 Nov: the soft gate); older cached copies are simply no longer used.
+    target = source.with_name(f"{source.stem}.{'clean-v2.wav' if kind == 'clean' else 'spectrogram.png'}")
     if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
         samples, rate = read_wav(source.read_bytes())
         data = write_wav(clean(samples, rate), rate) if kind == "clean" else spectrogram_png(samples, rate)
