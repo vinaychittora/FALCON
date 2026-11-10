@@ -5,6 +5,7 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.responses import Response
 
 from app.schemas import Event, Review
+from app.services.configuration import load_analysis_settings
 from app.services.review_names import resolve_review_names
 from app.storage.jobs import now
 from app.storage.jsonl import match_score, normalize
@@ -32,6 +33,7 @@ def observation_archive(
     captured_to: AwareDatetime | None = None,
     min_score: float | None = Query(None, ge=-1, le=1),
     include_discarded: bool = False,
+    resolved_only: bool = False,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> ObservationPage:
@@ -61,6 +63,7 @@ def observation_archive(
             captured_to=captured_to,
             min_score=min_score,
             include_discarded=include_discarded,
+            resolved_only=resolved_only,
         )
     )
 
@@ -129,11 +132,16 @@ class Encounter(BaseModel):
     review_status: str
     thumbnail_event_id: str
     event: Event
+    best_confidence: float | None = None
 
 
 class EncounterPage(BaseModel):
     encounters: list[Encounter]
     total: int
+    # Visits left out because every record was unresolved (no species, no group).
+    hidden_unresolved: int = 0
+    # Picture visits left out by hide_glimpses: seen in one analysed frame only.
+    hidden_glimpses: int = 0
 
 
 @router.get("/encounters", response_model=EncounterPage)
@@ -149,16 +157,25 @@ def encounters(
     captured_to: AwareDatetime | None = None,
     min_score: float | None = Query(None, ge=-1, le=1),
     include_discarded: bool = False,
+    resolved_only: bool = False,
+    order: Literal["latest", "first_seen"] = "latest",
+    hide_glimpses: bool = False,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> EncounterPage:
-    """Animal visits: frame records of one visual track are grouped into one row."""
+    """Animal visits: frame records of one visual track are grouped into one row.
+
+    resolved_only hides visits that have no species and no group yet (and unreviewed
+    people or vehicles); order=first_seen lists visits by when they began.
+    """
     if captured_from and captured_to and captured_from > captured_to:
         raise HTTPException(422, "The time window must start before it ends")
     page = EncounterPage.model_validate(request.app.state.events.encounters(
         source_id=source_id, scope=scope, review_status=review_status, modality=modality,
         captured_from=captured_from, captured_to=captured_to, min_score=min_score,
         include_discarded=include_discarded, q=q, limit=limit, offset=offset,
+        resolved_only=resolved_only, order=order, hide_glimpses=hide_glimpses,
+        tiers=load_analysis_settings(request.app.state.config),
     ))
     names = resolve_review_names([item.event for item in page.encounters], request.app.state.taxa)
     for item, event in zip(page.encounters, names, strict=True):

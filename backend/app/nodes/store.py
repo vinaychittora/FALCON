@@ -43,6 +43,9 @@ class PairedNode:
     audio_analysis: bool
     created_at: str
     updated_at: str
+    # "node": the node's own camera. "ip": the saved IP camera (Sensors → IP camera)
+    # supplies the picture while sound and sensors still come from this node.
+    video_source: str = "node"
 
     @property
     def host(self) -> str:
@@ -58,25 +61,30 @@ class NodeStore:
                 "address TEXT NOT NULL, key_ciphertext BLOB NOT NULL, audio_analysis INTEGER NOT NULL, "
                 "created_at TEXT NOT NULL, updated_at TEXT NOT NULL)"
             )
+            columns = {row[1] for row in connection.execute("PRAGMA table_info(sensor_nodes)")}
+            if "video_source" not in columns:
+                connection.execute("ALTER TABLE sensor_nodes ADD COLUMN video_source TEXT NOT NULL DEFAULT 'node'")
 
     @staticmethod
     def _node(row: sqlite3.Row) -> PairedNode:
         return PairedNode(
             row["node_id"], row["name"], row["address"], bool(row["audio_analysis"]),
-            row["created_at"], row["updated_at"],
+            row["created_at"], row["updated_at"], row["video_source"] or "node",
         )
+
+    _COLUMNS = "node_id,name,address,audio_analysis,created_at,updated_at,video_source"
 
     def list(self) -> list[PairedNode]:
         with self.database.connection() as connection:
             rows = connection.execute(
-                "SELECT node_id,name,address,audio_analysis,created_at,updated_at FROM sensor_nodes ORDER BY created_at"
+                f"SELECT {self._COLUMNS} FROM sensor_nodes ORDER BY created_at"
             ).fetchall()
         return [self._node(row) for row in rows]
 
     def get(self, node_id: str) -> PairedNode:
         with self.database.connection() as connection:
             row = connection.execute(
-                "SELECT node_id,name,address,audio_analysis,created_at,updated_at FROM sensor_nodes WHERE node_id=?",
+                f"SELECT {self._COLUMNS} FROM sensor_nodes WHERE node_id=?",
                 (node_id,),
             ).fetchone()
         if row is None:
@@ -99,21 +107,32 @@ class NodeStore:
         moment = now()
         with self.database.connection() as connection:
             previous = connection.execute("SELECT created_at FROM sensor_nodes WHERE node_id=?", (node_id,)).fetchone()
+            source = connection.execute(
+                "SELECT video_source FROM sensor_nodes WHERE node_id=?", (node_id,),
+            ).fetchone()
             connection.execute(
-                "INSERT OR REPLACE INTO sensor_nodes VALUES (?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO sensor_nodes (node_id,name,address,key_ciphertext,audio_analysis,"
+                "created_at,updated_at,video_source) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (node_id, name[:80], address, ciphertext, int(audio_analysis),
-                 previous["created_at"] if previous else moment, moment),
+                 previous["created_at"] if previous else moment, moment,
+                 source["video_source"] if source else "node"),
             )
         return self.get(node_id)
 
-    def update(self, node_id: str, *, name: str | None = None, audio_analysis: bool | None = None) -> PairedNode:
+    def update(
+        self, node_id: str, *, name: str | None = None, audio_analysis: bool | None = None,
+        video_source: str | None = None,
+    ) -> PairedNode:
         node = self.get(node_id)
+        if video_source is not None and video_source not in {"node", "ip"}:
+            raise ValueError("Video source must be the node camera or the IP camera")
         with self.database.connection() as connection:
             connection.execute(
-                "UPDATE sensor_nodes SET name=?, audio_analysis=?, updated_at=? WHERE node_id=?",
+                "UPDATE sensor_nodes SET name=?, audio_analysis=?, video_source=?, updated_at=? WHERE node_id=?",
                 (
                     (name.strip()[:80] or node.name) if name is not None else node.name,
-                    int(node.audio_analysis if audio_analysis is None else audio_analysis), now(), node_id,
+                    int(node.audio_analysis if audio_analysis is None else audio_analysis),
+                    video_source or node.video_source, now(), node_id,
                 ),
             )
         return self.get(node_id)

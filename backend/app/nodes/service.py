@@ -23,6 +23,7 @@ from app.nodes.store import NodeStore, PairedNode, normalize_address
 from app.schemas import AnalysisSettings
 from app.schemas_live import LiveStart
 from app.schemas_sensors import SensorReadingWrite
+from app.services.clock_check import ClockRate
 from app.storage.sensors import SensorReplayConflict
 
 log = logging.getLogger("falcon.nodes")
@@ -47,6 +48,7 @@ class NodeManager:
         self.store, self.ingest, self.live_state = store, ingest, live_state
         self.interval, self.client_factory = interval, client_factory
         self._snapshots: dict[str, Snapshot] = {}
+        self._clock_rates: dict[str, ClockRate] = {}
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -90,12 +92,47 @@ class NodeManager:
         with self._lock:
             return self._snapshots.setdefault(node_id, Snapshot())
 
+    def restart_observed_stream(self) -> None:
+        """Restart the observed node's stream (used when its sound track goes silent)."""
+        if self.observing:
+            self.client(self.observing).stream("restart")
+
+    def temperature(self) -> float | None:
+        """The observed node's CPU temperature from its last status, for the night log."""
+        node_id = self.observing
+        if node_id is None:
+            return None
+        with self._lock:
+            status = self._snapshots.get(node_id, Snapshot()).status or {}
+        value = (status.get("system") or {}).get("cpu_temperature_c")
+        return float(value) if isinstance(value, (int, float)) else None
+
+    def night_mode(self) -> str | None:
+        """The night-picture mode FALCON applies for the observed node, if that node
+        passes its webcam's frames through (it then leaves the night picture to FALCON)."""
+        node_id = self.observing
+        if node_id is None:
+            return None
+        with self._lock:
+            status = self._snapshots.get(node_id, Snapshot()).status or {}
+        night = (status.get("stream") or {}).get("night") or {}
+        mode = night.get("mode")
+        if night.get("applied_by") == "falcon" and mode in {"auto", "colour", "mono"}:
+            return str(mode)
+        return None
+
     def _record(self, node_id: str, status: dict[str, Any] | None, error: str | None) -> None:
         moment = datetime.now(UTC).isoformat()
         with self._lock:
             snapshot = self._snapshot(node_id)
             snapshot.checked_at, snapshot.error = moment, error
             if status is not None:
+                # This computer's clock speed against the node's uptime (see clock_check).
+                uptime = (status.get("system") or {}).get("uptime_seconds")
+                if isinstance(uptime, (int, float)) and not isinstance(uptime, bool):
+                    rate = self._clock_rates.setdefault(node_id, ClockRate())
+                    rate.observe(float(uptime))
+                    status = {**status, "falcon_clock": rate.report()}
                 snapshot.status, snapshot.last_seen = status, moment
 
     def refresh(self, node: PairedNode) -> dict[str, Any] | None:
@@ -153,6 +190,7 @@ class NodeManager:
         return {
             "node_id": node.node_id, "name": node.name, "address": node.address,
             "audio_analysis": node.audio_analysis, "created_at": node.created_at, "updated_at": node.updated_at,
+            "video_source": node.video_source,
             "online": snapshot.error is None and status is not None,
             "checked_at": snapshot.checked_at, "last_seen": snapshot.last_seen, "error": snapshot.error,
             "readings_collected": snapshot.readings_collected, "observing": observing, "status": status,
@@ -212,12 +250,24 @@ class NodeManager:
         stream = status["stream"]
         host = f"[{node.host}]" if ":" in node.host else node.host
         url = urlunsplit(("rtsp", f"{host}:{int(stream['rtsp_port'])}", "/" + str(stream["rtsp_path"]), "", ""))
-        return LiveStart(
+        node_request = LiveStart(
             name=node.name, url=SecretStr(url),
             username=SecretStr(RTSP_USER), password=SecretStr(rtsp_password(key)),
             config=config.model_copy(update={"audio_enabled": node.audio_analysis and bool(stream.get("audio"))}),
             use_saved_credentials=False, save_profile=False,
         )
+        if node.video_source != "ip":
+            return node_request
+        # The saved IP camera supplies the picture; this node still supplies the sound.
+        profile = self.store.cameras.public()
+        if not profile.saved:
+            raise NodeError("Video source is the IP camera, but no IP camera is saved under Sensors.")
+        camera = self.store.cameras.resolve(LiveStart(
+            name=node.name, url=SecretStr(profile.url),
+            username=SecretStr(profile.username) if profile.username else None,
+            config=node_request.config, use_saved_credentials=True, save_profile=False,
+        ))
+        return camera.model_copy(update={"audio_url": SecretStr(node_request.connection_url())})
 
     def forget(self, node_id: str) -> None:
         self.store.delete(node_id)

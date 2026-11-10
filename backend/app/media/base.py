@@ -15,6 +15,14 @@ class Frame:
     next_sample_s: float | None = None
     recording_generation: str | None = None
     recording_timestamp_s: float | None = None
+    # FALCON made this picture greyscale (night picture for a pass-through node);
+    # clips around it are saved in greyscale too.
+    greyscale: bool = False
+    # Percent cut off the left and right of the camera picture (Crop sides setting).
+    crop: tuple[float, float] = (0.0, 0.0)
+    # Milliseconds detection was held (flicker guard) just before this frame; tracks
+    # do not age over it.
+    suspended_ms: int = 0
 
 
 class MediaSource(Protocol):

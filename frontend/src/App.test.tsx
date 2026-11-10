@@ -14,6 +14,8 @@ describe("application shell", () => {
       "Field Acoustic, Lens &amp; Climate Observation Node",
     );
     expect(html).toContain("Display and accessibility options");
+    expect(html).toContain('href="#/summary"');
+    expect(html).not.toContain("Install app");
     expect(html).not.toContain("Upload photo, video or audio");
   });
 
@@ -21,6 +23,8 @@ describe("application shell", () => {
     expect(pageFromHash("#/review")).toBe("review");
     expect(pageFromHash("#export")).toBe("export");
     expect(pageFromHash("#/sensors?node=1")).toBe("sensors");
+    expect(pageFromHash("#/summary")).toBe("summary");
+    expect(pageFromHash("#/export?source=abc")).toBe("export");
     expect(pageFromHash("#/unknown")).toBe("live");
     expect(pageFromHash("")).toBe("live");
     expect(pageFromHash("#/help/sensor-node/checks")).toBe("help");

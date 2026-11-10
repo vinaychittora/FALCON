@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from falcon_node import VERSION, media, system
+from falcon_node import VERSION, extras, media, system, thermal
 from falcon_node.auth import Verifier, rtsp_password
 from falcon_node.bme280 import BME280
 from falcon_node.config import COMPONENTS, NodeConfig, NodeState
@@ -33,14 +33,63 @@ class StreamSupervisor(threading.Thread):
         self.retry_at = 0.0
         self.since: str | None = None
         self.last_error: str | None = None
+        # Night picture (USB webcams): greyscale while the IR lights make it magenta.
+        self.night_dark = False
+        self.colour_cast: float | None = None
+        self._night_streak = 0
+        self._night_checked = 0.0
+
+    def probe_path(self) -> str:
+        # Rewritten with every frame, so it must not live on the SD card: /tmp is the
+        # service's private tmpfs (PrivateTmp=yes; Debian 13 keeps /tmp in RAM).
+        return "/tmp/falcon-node-colour-probe.ppm"
+
+    def night_picture(self, camera: media.Camera | None) -> tuple[bool, str | None]:
+        """(greyscale now?, colour-probe file or None) for the camera's Night picture setting."""
+        mode = self.agent.state.camera.night_mode
+        if camera is None or camera.kind == "rtsp":
+            return False, None
+        if self.passthrough(camera):
+            return False, None  # FALCON applies the night picture on the PC
+        probe = self.probe_path() if camera.kind == "v4l2" and mode == "auto" else None
+        return mode == "mono" or (mode == "auto" and self.night_dark), probe
+
+    def check_night(self) -> None:
+        """Switch to greyscale when the colour probe turns magenta, back when it clears.
+        Three readings in a row (about 30 s) must agree, so dusk does not flicker."""
+        now = time.monotonic()
+        if now - self._night_checked < media.PROBE_SECONDS:
+            return
+        self._night_checked = now
+        camera, _ = self.sources()
+        if camera is None or camera.kind != "v4l2" or self.agent.state.camera.night_mode != "auto":
+            return
+        if self.pipeline is None or not self.pipeline.alive():
+            return
+        try:
+            cast = media.colour_cast(Path(self.probe_path()).read_bytes())
+        except OSError:
+            return
+        if cast is None:
+            return
+        self.colour_cast = cast
+        dark = cast > media.NIGHT_ON if not self.night_dark else cast >= media.NIGHT_OFF
+        self._night_streak = self._night_streak + 1 if dark != self.night_dark else 0
+        if self._night_streak >= 3:
+            self.night_dark, self._night_streak = dark, 0
+            log.info("Night picture: %s (colour cast %.0f)", "greyscale" if dark else "colour", cast)
+            self.restart()
 
     def sources(self) -> tuple[media.Camera | None, media.Microphone | None]:
         agent = self.agent
-        camera = agent.camera if agent.state.components["camera"] else None
+        cooling = agent.thermal.level >= thermal.CAMERA_PAUSED
+        camera = agent.camera if agent.state.components["camera"] and not cooling else None
         microphone = agent.microphone if agent.state.components["microphone"] else None
         return camera, microphone
 
     def desired(self) -> bool:
+        if self.agent.thermal.level >= thermal.STREAM_STOPPED:
+            return False
         camera, microphone = self.sources()
         return self.agent.state.stream_enabled and (camera is not None or microphone is not None)
 
@@ -55,9 +104,17 @@ class StreamSupervisor(threading.Thread):
         camera, microphone = self.sources()
         if microphone is not None:
             media.apply_mixer(microphone, agent.state.microphone, Path(agent.config.mixer_state))
+        media.apply_camera_controls(camera, agent.config.camera_controls)
+        if camera is not None and camera.kind == "v4l2" and agent.state.picture:
+            try:
+                media.set_picture_controls(camera, agent.state.picture)
+            except ValueError as exc:
+                log.warning("Saved picture controls not applied: %s", exc)
+        mono, probe = self.night_picture(camera)
         commands = media.build_pipeline(
             camera, agent.state.camera, microphone, agent.state.microphone,
             f"rtsp://127.0.0.1:{agent.config.rtsp_port}/{media.STREAM_PATH}", agent.config.ffmpeg,
+            mono=mono, probe_path=probe,
         )
         self.pipeline = media.Pipeline(commands)
         self.since = datetime.now(UTC).isoformat()
@@ -112,6 +169,8 @@ class StreamSupervisor(threading.Thread):
         alive = self.pipeline is not None and self.pipeline.alive()
         if not self.agent.state.stream_enabled:
             state = "off"
+        elif self.agent.thermal.level >= thermal.STREAM_STOPPED:
+            state = "too hot"
         elif camera is None and microphone is None:
             state = "no sources"
         elif alive and (path is None or path["ready"]):
@@ -126,12 +185,28 @@ class StreamSupervisor(threading.Thread):
             "rtsp_port": self.agent.config.rtsp_port, "rtsp_path": media.STREAM_PATH,
             "video": camera is not None, "audio": microphone is not None or bool(camera and camera.kind == "rtsp"),
             "tracks": path["tracks"] if path else [], "readers": path["readers"] if path else 0,
+            "night": {
+                "mode": self.agent.state.camera.night_mode,
+                "greyscale": self.night_picture(camera)[0],
+                "colour_cast": round(self.colour_cast, 1) if self.colour_cast is not None else None,
+                # In pass-through the node sends colour frames; FALCON applies the mode.
+                "applied_by": "falcon" if self.passthrough(camera) else "node",
+            },
+            "video_codec": "mjpeg" if self.passthrough(camera) else ("h264" if camera else None),
         }
+
+    def passthrough(self, camera: media.Camera | None) -> bool:
+        """The webcam's MJPEG frames go out untouched (decoded by FALCON on the PC)."""
+        return bool(
+            camera and camera.kind == "v4l2" and camera.input_format == "mjpeg"
+            and self.agent.state.camera.video_codec == "mjpeg"
+        )
 
     def run(self) -> None:
         while not self.stop_event.is_set():
             try:
                 self.step()
+                self.check_night()
             except Exception:
                 log.exception("Stream supervision failed")
             self.wake.wait(1.0)
@@ -164,6 +239,10 @@ class Agent:
         if detect:
             self.detect()
         self.sampler = self._sampler()
+        self.thermal = thermal.ThermalGuard(
+            config.thermal_pause_c, config.thermal_stop_c, config.thermal_resume_c,
+            lambda level: self.stream.restart(),
+        )
         self.stream = StreamSupervisor(self)
 
     # --- hardware ---
@@ -252,7 +331,7 @@ class Agent:
                 "kind": self.camera.kind if self.camera else None,
                 "description": self.camera.description if self.camera else None,
                 "controls": media.CONTROLS.get(self.camera.kind, []) if self.camera else [],
-                "resolutions": media.RESOLUTIONS.get(self.camera.kind, []) if self.camera else [],
+                "resolutions": media.resolutions(self.camera),
             },
             "microphone": {
                 "present": self.microphone is not None, "enabled": self.state.components["microphone"],
@@ -280,6 +359,7 @@ class Agent:
             "agent_uptime_seconds": round(time.monotonic() - self.started),
             "system": system.health(self.config.state_dir),
             "stream": self.stream.status(),
+            "thermal": self.thermal.status(),
             "components": components,
             "camera_settings": self.state.camera.public(),
             "microphone_settings": {
@@ -319,13 +399,43 @@ class Agent:
         unsupported = sorted(set(changes) - allowed)
         if unsupported:
             raise ValueError(f"This camera does not support: {', '.join(unsupported)}")
+        if "resolution" in changes and changes["resolution"] not in media.resolutions(self.camera):
+            raise ValueError("This camera does not offer that resolution")
         self.state.camera = self.state.camera.updated(changes, self.camera.kind)
         self.state.save()
         self.stream.restart()
 
+    def camera_picture(self) -> dict[str, Any]:
+        """The webcam's adjustable picture controls with their current values."""
+        return {"controls": media.picture_controls(self.camera), "saved": dict(self.state.picture)}
+
+    def update_camera_picture(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Change picture controls live (no stream restart) and remember them.
+        {"values": {name: number}} or {"reset": true} for the camera's defaults."""
+        if self.camera is None or self.camera.kind != "v4l2":
+            raise ValueError("Picture controls are available for USB webcams only")
+        if data.get("reset") is True:
+            defaults = {item["name"]: item["default"] for item in media.picture_controls(self.camera)}
+            media.set_picture_controls(self.camera, defaults)
+            self.state.picture = {}
+        else:
+            values = data.get("values")
+            if not isinstance(values, dict) or not values or len(values) > 20:
+                raise ValueError("Send values as an object of control names and numbers")
+            media.set_picture_controls(self.camera, values)
+            self.state.picture = {**self.state.picture, **{str(k): int(v) for k, v in values.items()}}
+        self.state.save()
+        return self.camera_picture()
+
     def update_microphone(self, changes: dict[str, Any]) -> None:
         self.state.microphone = self.state.microphone.updated(changes)
         self.state.save()
+        gain = self.state.microphone.audio_gain_percent
+        # A gain change alone applies live, so someone listening hears it while
+        # dragging; restarting the stream would cut the sound (and can stall the HAT).
+        if set(changes) == {"audio_gain_percent"} and self.microphone is not None and gain is not None:
+            if media.apply_gain(self.microphone, gain):
+                return
         self.stream.restart()
 
     def pull(self, ack: list[str], limit: int) -> dict[str, Any]:
@@ -348,9 +458,54 @@ class Agent:
     # --- lifecycle ---
     def start(self) -> None:
         self.sampler.start()
+        self.thermal.start()
         self.stream.start()
+        threading.Thread(target=self._start_extras, daemon=True, name="falcon-node-extras").start()
+
+    def _start_extras(self) -> None:
+        # Extras chosen to "start at boot". Never switched off here: a node restart
+        # must not drop a phone that is using the hotspot.
+        for name, wanted in self.state.extras_at_boot.items():
+            if wanted and name in extras.EXTRAS:
+                try:
+                    if not extras.state(name)["on"]:
+                        extras.switch(name, True)
+                except (ValueError, KeyError) as exc:
+                    log.warning("%s not started at boot: %s", name, exc)
+
+    def extras_status(self) -> dict[str, Any]:
+        """Optional extras (hotspot, bluetooth), with heat and power facts for the UI."""
+        items = []
+        for name, meta in extras.EXTRAS.items():
+            items.append({
+                "name": name, **meta, **extras.state(name),
+                "at_boot": self.state.extras_at_boot.get(name, False),
+            })
+        return {
+            "extras": items, "thermal": self.thermal.status(),
+            "cpu_temperature_c": thermal.cpu_temperature(), "power": system.throttling(),
+        }
+
+    def update_extra(self, data: dict[str, Any]) -> dict[str, Any]:
+        """{"name": "hotspot", "on": true|false, "at_boot": true|false} (either or both)."""
+        name = data.get("name")
+        if name not in extras.EXTRAS:
+            raise ValueError("Choose hotspot or bluetooth")
+        on, at_boot = data.get("on"), data.get("at_boot")
+        if on is None and at_boot is None:
+            raise ValueError("Send on and/or at_boot")
+        for value in (on, at_boot):
+            if value is not None and not isinstance(value, bool):
+                raise ValueError("on and at_boot must be true or false")
+        if at_boot is not None:
+            self.state.extras_at_boot[name] = at_boot
+            self.state.save()
+        if on is not None:
+            extras.switch(name, on)
+        return self.extras_status()
 
     def stop(self) -> None:
+        self.thermal.stop_event.set()
         self.sampler.stop_event.set()
         self.stream.stop_event.set()
         self.stream.wake.set()

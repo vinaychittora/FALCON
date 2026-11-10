@@ -22,6 +22,10 @@ class Database:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(
                 """
+                CREATE TABLE IF NOT EXISTS visits (
+                    visit_id TEXT PRIMARY KEY, job_id TEXT NOT NULL,
+                    hidden_reason TEXT, updated_at TEXT NOT NULL, payload TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS jobs (
                     job_id TEXT PRIMARY KEY, source_id TEXT NOT NULL,
                     created_at TEXT NOT NULL, payload TEXT NOT NULL

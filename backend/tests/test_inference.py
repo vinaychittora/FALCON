@@ -209,9 +209,11 @@ def test_scene_cut_and_live_track_evidence_expiry() -> None:
     track.expire_evidence(4999)
     assert track.count == 1
     track.expire_evidence(5000)
-    assert track.count == 0 and track.score_sum is None and track.best_quality == 0
+    # The crop budget restarts; the identity so far continues as one prior crop.
+    assert track.count == 0 and track.best_quality == 0
+    assert track.score_sum is not None and track.score_sum[0] == pytest.approx(0.9)
     track.add_scores(np.array([0.1, 0.9], dtype=np.float32), 100, 5000)
-    assert track.score_sum is not None and track.score_sum[1] == pytest.approx(0.9)
+    assert track.score_sum is not None and track.score_sum[1] == pytest.approx(1.0)
     tracker.reset()
     assert tracker.update(proposals, 5500)[0].track_id != track.track_id
 

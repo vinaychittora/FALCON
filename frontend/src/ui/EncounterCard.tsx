@@ -9,6 +9,7 @@ import {
   thumbnailUrl,
   type Encounter,
 } from "../api/encounters";
+import { certaintyDetail, certaintyOf } from "../api/certainty";
 import { formatClock, formatDateTime, formatDuration } from "../api/format";
 import type { Taxon } from "../pages/Taxa";
 import type { ReviewStatus } from "../types";
@@ -93,6 +94,9 @@ export default function EncounterCard({
   const { primary, scientific } = encounterNames(event, names);
   const score = scoreSummary(event);
   const status = STATUS_LABELS[encounter.review_status];
+  const certainty =
+    encounter.review_status === "unreviewed" ? certaintyOf(event) : null;
+  const detail = certaintyDetail(event);
   const confirmable = canConfirm(event) || event.review.status === "corrected";
 
   async function decide(next: ReviewStatus, taxonId?: number) {
@@ -143,6 +147,7 @@ export default function EncounterCard({
       aria-label={`${primary}, ${status.label}, ${when}`}
       onKeyDown={onKeyDown}
       data-status={encounter.review_status}
+      data-certainty={certainty?.level}
     >
       {onSelect && (
         <label className="encounter-select" title="Select for bulk review">
@@ -185,8 +190,15 @@ export default function EncounterCard({
           <div>
             <strong>{primary}</strong>
             {scientific && <em>{scientific}</em>}
+            {!scientific && detail && <em>{detail}</em>}
           </div>
-          <Pill tone={status.tone as Tone}>{status.label}</Pill>
+          {certainty ? (
+            <Pill tone={certainty.tone} title={certainty.title}>
+              {certainty.label}
+            </Pill>
+          ) : (
+            <Pill tone={status.tone as Tone}>{status.label}</Pill>
+          )}
         </div>
         <div className="encounter-meta">
           <span>

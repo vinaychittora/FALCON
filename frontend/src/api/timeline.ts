@@ -21,6 +21,43 @@ export function currentEvents(events: Detection[], time: number) {
     .slice(0, 10);
   return { visual, audio };
 }
+/**
+ * What was seen shortly before `time` and is no longer in view: one entry per visual
+ * track (its latest record) and each sound detection, newest first.
+ */
+export function recentEvents(
+  events: Detection[],
+  time: number,
+  windowMs = 20000,
+  limit = 8,
+): Detection[] {
+  const current = new Set(
+    events
+      .filter((e) =>
+        e.modality === "visual"
+          ? e.timestamp_ms <= time && time < e.timestamp_ms + e.duration_ms
+          : e.start_ms <= time && time < e.end_ms,
+      )
+      .map((e) => (e.modality === "visual" ? e.track_id : e.event_id)),
+  );
+  const latest = new Map<string, Detection>();
+  for (const e of events) {
+    const start = eventTime(e);
+    const end =
+      e.modality === "visual" ? e.timestamp_ms + e.duration_ms : e.end_ms;
+    if (end > time || start < time - windowMs) continue;
+    if (e.modality === "visual" && e.classification.status === "non_wildlife")
+      continue;
+    if (["false_positive", "discarded"].includes(e.review.status)) continue;
+    const key = e.modality === "visual" ? e.track_id : e.event_id;
+    if (current.has(key)) continue;
+    const seen = latest.get(key);
+    if (!seen || eventTime(seen) < start) latest.set(key, e);
+  }
+  return [...latest.values()]
+    .sort((a, b) => eventTime(b) - eventTime(a))
+    .slice(0, limit);
+}
 export const eventTime = (e: Detection) =>
   e.modality === "visual" ? e.timestamp_ms : e.start_ms;
 export const predictionLabel = (e: Detection) =>

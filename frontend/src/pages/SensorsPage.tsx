@@ -8,7 +8,6 @@ import {
   forgetNode,
   listNodes,
   nodeComponent,
-  nodeMicrophone,
   nodeStream,
   nodeSystem,
   nodeWarnings,
@@ -29,8 +28,8 @@ import {
 } from "../components/LiveCamera";
 import SensorHistory from "../components/SensorHistory";
 import { usePoll } from "../hooks/usePoll";
-import CameraControls from "../ui/CameraControls";
 import Pill from "../ui/Pill";
+import SensorSettings, { NodeTabs, sensorRoute } from "./SensorSettings";
 
 type Appliance = {
   auto_observe: boolean;
@@ -170,6 +169,7 @@ function NodePanel({
           </small>
         </div>
       </div>
+      <NodeTabs nodeId={node.node_id} active="status" />
       {!node.online && (
         <p className="banner banner-bad">
           {node.error ?? "The node is not answering."} Check that it is powered,
@@ -378,12 +378,12 @@ function NodePanel({
                   warn={(system?.disk_free_bytes ?? Infinity) < 1024 ** 3}
                 />
                 <Metric
-                  label="Wi-Fi signal"
+                  label="Network"
                   value={
                     system?.wifi_signal_dbm !== null &&
                     system?.wifi_signal_dbm !== undefined
-                      ? `${system.wifi_signal_dbm} dBm`
-                      : "wired / none"
+                      ? `Wi-Fi ${system.wifi_signal_dbm} dBm`
+                      : "Wired"
                   }
                   warn={
                     (system?.wifi_signal_dbm ?? 0) < -75 &&
@@ -450,14 +450,40 @@ function NodePanel({
                   value={`rtsp :${status.stream.rtsp_port}/${status.stream.rtsp_path}`}
                 />
               </div>
+            </div>
+            <div>
               <h3 className="section-title">Weather readings</h3>
               <div className="metrics">
                 <Metric
-                  label="Latest"
+                  label="Temperature"
+                  value={
+                    status.last_reading?.temperature_c != null
+                      ? `${status.last_reading.temperature_c} °C`
+                      : "—"
+                  }
+                />
+                <Metric
+                  label="Humidity"
+                  value={
+                    status.last_reading?.humidity_percent != null
+                      ? `${status.last_reading.humidity_percent} %`
+                      : "—"
+                  }
+                />
+                <Metric
+                  label="Pressure"
+                  value={
+                    status.last_reading?.pressure_hpa != null
+                      ? `${status.last_reading.pressure_hpa} hPa`
+                      : "—"
+                  }
+                />
+                <Metric
+                  label="Rain plate"
                   value={
                     status.last_reading
-                      ? `${status.last_reading.temperature_c ?? "—"} °C · ${status.last_reading.humidity_percent ?? "—"} % · ${status.last_reading.pressure_hpa ?? "—"} hPa · ${wetness(status.last_reading.surface_wet)}`
-                      : "none yet"
+                      ? wetness(status.last_reading.surface_wet)
+                      : "—"
                   }
                 />
                 <Metric
@@ -483,63 +509,6 @@ function NodePanel({
               </div>
             </div>
           </div>
-          {status.components.camera.present && (
-            <details className="settings-block">
-              <summary>
-                <Icon name="camera" size={16} /> Camera picture settings
-              </summary>
-              <CameraControls node={node} onChanged={onChanged} />
-            </details>
-          )}
-          {status.components.microphone.present && (
-            <details className="settings-block">
-              <summary>
-                <Icon name="sound" size={16} /> Microphone settings
-              </summary>
-              <div className="control-grid">
-                <label className="switch-row">
-                  <input
-                    type="checkbox"
-                    role="switch"
-                    checked={node.audio_analysis}
-                    disabled={!!busy}
-                    onChange={(change) =>
-                      void run("audio", () =>
-                        updateNode(node.node_id, {
-                          audio_analysis: change.target.checked,
-                        }),
-                      )
-                    }
-                  />
-                  <span>Identify bird calls in FALCON (BirdNET)</span>
-                </label>
-                <div className="control">
-                  <label htmlFor={`${node.node_id}-channel`}>
-                    Microphone channel
-                  </label>
-                  <select
-                    id={`${node.node_id}-channel`}
-                    value={status.microphone_settings.audio_channel}
-                    disabled={!!busy || !node.online}
-                    onChange={(change) =>
-                      void run("channel", () =>
-                        nodeMicrophone(node.node_id, {
-                          audio_channel: change.target.value as
-                            "average" | "left" | "right",
-                        }),
-                      )
-                    }
-                  >
-                    <option value="average">
-                      Both, averaged (recommended)
-                    </option>
-                    <option value="left">Left only (microphone 1)</option>
-                    <option value="right">Right only (microphone 2)</option>
-                  </select>
-                </div>
-              </div>
-            </details>
-          )}
         </>
       )}
     </section>
@@ -912,6 +881,35 @@ export default function SensorsPage({
   const nodes = usePoll(listNodes, 5000);
   const [pairing, setPairing] = useState(false);
   const list = nodes.data?.nodes ?? [];
+  // "#/sensors/<node>/<sensor>" opens that sensor's own settings page.
+  const [route, setRoute] = useState(() =>
+    typeof window === "undefined" ? null : sensorRoute(window.location.hash),
+  );
+  useEffect(() => {
+    const onHash = () => setRoute(sensorRoute(window.location.hash));
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+  const routed = route && list.find((item) => item.node_id === route.nodeId);
+  if (route && routed)
+    return (
+      <div className="page sensors-page">
+        <header className="page-header">
+          <div>
+            <h1>{routed.name}</h1>
+            <p>
+              Settings for each sensor on this node. Most changes apply
+              immediately; the page says when the stream restarts.
+            </p>
+          </div>
+        </header>
+        <SensorSettings
+          node={routed}
+          section={route.section}
+          onChanged={() => nodes.refresh()}
+        />
+      </div>
+    );
   return (
     <div className="page sensors-page">
       <header className="page-header">

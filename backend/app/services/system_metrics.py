@@ -70,6 +70,8 @@ class SystemMetrics(BaseModel):
     storage: StorageMetrics = Field(default_factory=StorageMetrics)
     process: ProcessMetrics = Field(default_factory=ProcessMetrics)
     gpu: GpuMetrics = Field(default_factory=GpuMetrics)
+    # Linux clock source; under WSL "tsc" once ran 10 % fast (see clock_check).
+    clocksource: str | None = None
     unavailable: list[str] = Field(default_factory=list)
 
 
@@ -169,6 +171,11 @@ class SystemMetricsSampler:
         result.gpu = self._gpu()
         if not result.gpu.available:
             result.unavailable.append("gpu")
+        try:
+            source = Path("/sys/devices/system/clocksource/clocksource0/current_clocksource").read_text().strip()
+            result.clocksource = source if source.replace("_", "").isalnum() and len(source) <= 40 else None
+        except OSError:
+            pass
         return result
 
     def _cpu(self) -> CpuMetrics:

@@ -4,10 +4,13 @@ import {
   scientificSubtitle,
   type TaxonNameIndex,
 } from "./names";
-import { predictionLabel } from "./timeline";
+import { leadingName } from "./certainty";
 import type { Detection, ReviewStatus } from "../types";
 
-/** One animal visit: the frame records of one visual track, or one sound detection. */
+/**
+ * One animal visit: the frame records of one visual track, or the calls of one bird
+ * heard close together (a bout of sound detections).
+ */
 export interface Encounter {
   encounter_id: string;
   modality: "visual" | "audio";
@@ -21,11 +24,17 @@ export interface Encounter {
   review_status: ReviewStatus | "mixed";
   thumbnail_event_id: string;
   event: Detection;
+  /** Sound visits: BirdNET confidence of the clearest call. */
+  best_confidence?: number | null;
 }
 
 export interface EncounterPage {
   encounters: Encounter[];
   total: number;
+  /** Visits left out by resolved_only: nothing known yet (no species, no group). */
+  hidden_unresolved?: number;
+  /** Picture visits left out by hide_glimpses: seen in one analysed frame only. */
+  hidden_glimpses?: number;
 }
 
 export interface EncounterFilters {
@@ -37,6 +46,12 @@ export interface EncounterFilters {
   captured_from?: string | null;
   captured_to?: string | null;
   min_score?: number | null;
+  /** Hide visits with no species and no group yet, and unreviewed people or vehicles. */
+  resolved_only?: boolean;
+  /** "latest" activity first (default) or by when each visit began. */
+  order?: "latest" | "first_seen";
+  /** Leave out picture visits seen in one frame only. */
+  hide_glimpses?: boolean;
   limit?: number;
   offset?: number;
 }
@@ -51,6 +66,9 @@ export function encounterQuery(filters: EncounterFilters): string {
     ["captured_from", filters.captured_from],
     ["captured_to", filters.captured_to],
     ["min_score", filters.min_score],
+    ["resolved_only", filters.resolved_only ? "true" : undefined],
+    ["order", filters.order],
+    ["hide_glimpses", filters.hide_glimpses ? "true" : undefined],
     ["limit", filters.limit ?? 50],
     ["offset", filters.offset ?? 0],
   ];
@@ -167,7 +185,7 @@ export function encounterNames(
       scientific: scientificSubtitle(primary, names.scientific),
     };
   }
-  const primary = predictionLabel(event).replace(/\s+[—–]\s*candidate$/i, "");
+  const primary = leadingName(event, taxa);
   const scientific =
     event.modality === "visual"
       ? event.classification.scientific_name

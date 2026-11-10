@@ -61,7 +61,7 @@ if [[ ${UNINSTALL:-0} -eq 1 ]]; then
 fi
 
 say "Installing system packages"
-packages=(ffmpeg alsa-utils python3 ca-certificates curl)
+packages=(ffmpeg alsa-utils v4l-utils python3 ca-certificates curl)
 if is_pi; then
   packages+=(i2c-tools)
   command -v rpicam-vid >/dev/null || command -v libcamera-vid >/dev/null || packages+=(rpicam-apps-lite)
@@ -162,6 +162,25 @@ if [[ -d /etc/polkit-1/rules.d ]]; then
 fi
 systemctl daemon-reload
 systemctl enable falcon-node.service >/dev/null
+
+# Keep the node minimal: extras that cost power and heat stay off until switched on
+# from FALCON (Sensors → Node power) or the phone page. SSH, NetworkManager and the
+# wired network are untouched. Set KEEP_EXTRAS=1 to skip this.
+if is_pi && [[ "${KEEP_EXTRAS:-0}" != 1 ]]; then
+  say "Switching off extras that only add heat (they can be started from FALCON)"
+  if command -v nmcli >/dev/null && nmcli -t -f NAME connection show 2>/dev/null | grep -qx falcon-hotspot; then
+    # The hotspot stays available but no longer starts by itself; the node starts it at
+    # boot only when "start at boot" is chosen in FALCON.
+    nmcli connection modify falcon-hotspot connection.autoconnect no || true
+  fi
+  for unit in bluetooth.service hciuart.service avahi-daemon.service avahi-daemon.socket \
+              apt-daily.timer apt-daily-upgrade.timer man-db.timer; do
+    if systemctl cat "$unit" >/dev/null 2>&1; then
+      # Disabled, not masked: Bluetooth can still be started from FALCON.
+      systemctl disable --now "$unit" >/dev/null 2>&1 || true
+    fi
+  done
+fi
 mkdir -p "$STATE_DIR"
 (cd "$PREFIX" && python3 -c 'from falcon_node import VERSION; print(VERSION)') > "$STATE_DIR/.installed"
 

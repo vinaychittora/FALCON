@@ -19,7 +19,7 @@ export interface Video {
 export interface Box {
   bbox_norm: [number, number, number, number];
   label: string;
-  tone?: "candidate" | "unknown";
+  tone?: "candidate" | "probable" | "possible" | "unknown";
 }
 export interface Candidate {
   taxon_id: number;
@@ -93,6 +93,8 @@ export interface VisualEvent extends BaseEvent {
   timestamp_ms: number;
   duration_ms: number;
   track_id: string;
+  /** The Phase 1 visit (from 8 Nov 2026); absent on records graded by the old rules. */
+  visit_id?: string | null;
   bbox_norm: Box["bbox_norm"];
   detector: { label: string; score: number | null; model: string };
   classification: {
@@ -107,8 +109,13 @@ export interface VisualEvent extends BaseEvent {
     top_k: Candidate[];
     model_evidence?: ModelEvidence[];
     consensus?: "single" | "agree" | "disagree" | "insufficient_evidence";
+    /** likely (green), probable (orange), possible (red), unknown (gray). */
+    certainty?: Certainty;
+    genus?: string | null;
+    contenders?: Candidate[];
   };
 }
+export type Certainty = "likely" | "probable" | "possible" | "unknown";
 export interface AudioEvent extends BaseEvent {
   modality: "audio";
   start_ms: number;
@@ -152,6 +159,7 @@ export interface Config {
   sample_fps: number;
   detector_threshold: number;
   species_threshold: number;
+  group_threshold: number;
   ambiguity_margin: number;
   detector_size: 320 | 640 | 960;
   max_proposals: number;
@@ -160,12 +168,24 @@ export interface Config {
   roi: [number, number, number, number];
   audio_enabled: boolean;
   birdnet_confidence: number;
+  sound_bout_gap_seconds?: number;
+  sound_bout_max_minutes?: number;
+  still_object_minutes?: number;
+  scenery_forget_hours?: number;
+  crop_left_percent?: number;
+  crop_right_percent?: number;
+  clip_pre_seconds?: number;
+  clip_post_seconds?: number;
+  flicker_step?: number;
+  flicker_flips_per_minute?: number;
+  flicker_hold_seconds?: number;
   site_lat: number | null;
   site_lon: number | null;
   recording_date: string | null;
   week: number | null;
   device: "auto" | "cuda" | "cpu";
   log_non_wildlife: boolean;
+  mask_people?: boolean;
   min_crop_side: number;
   min_sharpness: number;
   crops_per_track: number;
@@ -199,4 +219,6 @@ export interface LiveState {
   metrics: Record<string, string | number>;
   messages: string[];
   audio_status: string;
+  /** Detection paused for camera work since (ISO), else null. */
+  detection_paused_since?: string | null;
 }

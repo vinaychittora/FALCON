@@ -73,9 +73,20 @@ original-resolution crops are extracted in memory for the selected BioCLIP model
 preprocessing, the complete crop is resized proportionally to at most 512 pixels on its
 longest edge and centered on a square gray canvas. This preserves subjects near the crop
 edges instead of losing them to a center crop; it does not restore missing image detail.
-An IoU tracker aggregates a limited number of sharp crops without asserting biological
-identity. Track classification evidence expires after five seconds,
-and a scene-change heuristic resets tracks across large visual changes. Similar-looking
+A tracker aggregates a limited number of sharp crops without asserting biological
+identity. It matches boxes by overlap with the last or the motion-predicted box, or by
+centre distance of a similar-sized box when a fast bird leaves its previous box behind,
+and keeps a lost track alive for about four sampling intervals (at least 2.5 s) so a
+brief detector miss does not start a new visit. Every five seconds the accumulated
+identity decays to one prior crop that new crops outweigh, so a long visit neither keeps
+its first identity forever nor flips to unknown at each window boundary. When the species
+stays below threshold, the group (bird, mammal, ...) is still suggested if the top
+candidate clears a lower group threshold and the top-five candidates agree on the group.
+Each classification carries a certainty tier: likely (a clear species), probable (the best
+of the contenders within the ambiguity margin leads the label; the others and their shared
+genus, when they have one, are carried as contenders), possible (best match below the
+species threshold but above the group threshold, labelled with a question mark) and unknown. The interface colours boxes and cards by that tier and keeps the
+numbers in the side panel. A scene-change heuristic resets tracks across large visual changes. Similar-looking
 edits can still evade that heuristic. Conservative score/margin/detail rules retain
 unknowns. BioCLIP cosine similarity is not a probability.
 
@@ -133,6 +144,18 @@ Services bind to 127.0.0.1. File paths come only from the sample catalog. The se
 connection endpoint accepts validated RTSP/RTSPS URLs, not arbitrary file/HTTP URLs.
 Local site settings live in ignored configuration; no remote analysis, cloud storage or
 precise-location publishing is part of this application.
+
+## People
+
+People are never observations. Person boxes leave the pipeline before classification (unless
+non-wildlife logging is on for a test), and the same boxes, padded, are gray-filled in the
+review thumbnail, in the preview JPEG until the next analyzed frame, and in every frame of a
+saved clip whose window they fall into (a plane fill on the yuv420p array, no colour
+conversion). BirdNET is asked for its human-voice classes at a low confidence alongside the
+local bird list; those seconds are zeroed in saved WAV evidence and the classes are never
+events. The location filter is applied through an explicit species list (built once per
+latitude, longitude and week with BirdNET's species tool) so the voice classes can be
+requested in that mode too.
 
 ## Live camera flow
 

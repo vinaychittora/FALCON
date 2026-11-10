@@ -1,7 +1,65 @@
 import { useState } from "react";
+import { certaintyOf, leadingName } from "../api/certainty";
+import { eventTime, formatTime } from "../api/timeline";
 import type { AudioEvent, Detection, VisualEvent } from "../types";
 import { AudioCards, VisualCards } from "./DetectionCards";
 import Icon from "./Icon";
+import { useTaxonNames } from "./TaxonNames";
+
+/** What left the frame a moment ago; one tap seeks back to it. */
+export function RecentList({
+  events,
+  onSeek,
+  onInspect,
+  windowSeconds,
+}: {
+  events: Detection[];
+  onSeek?: (ms: number) => void;
+  onInspect: (e: Detection) => void;
+  windowSeconds: number;
+}) {
+  const taxonNames = useTaxonNames();
+  if (!events.length) return null;
+  return (
+    <div className="recent-list" aria-label="Recently seen">
+      <span className="eyebrow">Recently seen · last {windowSeconds} s</span>
+      <ul>
+        {events.map((e) => {
+          const certainty = certaintyOf(e);
+          return (
+            <li
+              key={e.event_id}
+              className={certainty ? `certainty-${certainty.level}` : ""}
+            >
+              <button
+                type="button"
+                className="recent-row"
+                title={onSeek ? "Jump to this moment" : "Open for review"}
+                onClick={() => (onSeek ? onSeek(eventTime(e)) : onInspect(e))}
+              >
+                <i aria-hidden="true" />
+                <strong>{leadingName(e, taxonNames)}</strong>
+                <code>{formatTime(eventTime(e))}</code>
+                <Icon
+                  name={e.modality === "audio" ? "sound" : "camera"}
+                  size={13}
+                />
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`Review ${leadingName(e, taxonNames)}`}
+                onClick={() => onInspect(e)}
+              >
+                <Icon name="external" size={14} />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 export default function ObservationRail({
   visual,
@@ -10,6 +68,9 @@ export default function ObservationRail({
   onInspect,
   live = false,
   audioOnly = false,
+  recent = [],
+  onSeek,
+  recentWindowSeconds = 20,
 }: {
   visual: VisualEvent[];
   audio: AudioEvent[];
@@ -17,9 +78,18 @@ export default function ObservationRail({
   onInspect: (e: Detection) => void;
   live?: boolean;
   audioOnly?: boolean;
+  /** Detections that left the frame within the recent window, newest first. */
+  recent?: Detection[];
+  onSeek?: (ms: number) => void;
+  recentWindowSeconds?: number;
 }) {
   const [channel, setChannel] = useState<"visual" | "audio">("visual");
   const activeChannel = audioOnly ? "audio" : channel;
+  const recentForChannel = recent.filter((e) =>
+    activeChannel === "visual"
+      ? e.modality === "visual"
+      : e.modality === "audio",
+  );
   return (
     <aside className="observation-rail" aria-label="Current observations">
       <div className="rail-heading">
@@ -69,10 +139,17 @@ export default function ObservationRail({
             </p>
           </>
         )}
+        <RecentList
+          events={recentForChannel}
+          onSeek={onSeek}
+          onInspect={onInspect}
+          windowSeconds={recentWindowSeconds}
+        />
       </div>
       {!audioOnly && (
         <p className="rail-note">
-          Visual similarity is not a calibrated probability.
+          Green likely · orange probable · red faint guess · gray unknown.
+          Similarity is not a probability.
         </p>
       )}
     </aside>

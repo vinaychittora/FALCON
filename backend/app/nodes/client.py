@@ -63,6 +63,25 @@ class NodeClient:
         result: dict[str, Any] = self.request("PUT", "/camera", changes)
         return result
 
+    def picture(self) -> dict[str, Any]:
+        """USB webcam picture controls (brightness, white balance, exposure…) and saved values."""
+        result: dict[str, Any] = self.request("GET", "/camera/controls")
+        return result
+
+    def set_picture(self, body: dict[str, Any]) -> dict[str, Any]:
+        """{"values": {name: number}} applies live without a stream restart; {"reset": true}."""
+        result: dict[str, Any] = self.request("PUT", "/camera/controls", body, timeout=15)
+        return result
+
+    def extras(self) -> dict[str, Any]:
+        """Hotspot and Bluetooth (on/off, start at boot) with the node's heat and power state."""
+        result: dict[str, Any] = self.request("GET", "/system/extras")
+        return result
+
+    def set_extra(self, change: dict[str, Any]) -> dict[str, Any]:
+        result: dict[str, Any] = self.request("PUT", "/system/extras", change, timeout=40)
+        return result
+
     def microphone(self, changes: dict[str, Any]) -> dict[str, Any]:
         result: dict[str, Any] = self.request("PUT", "/microphone", changes)
         return result

@@ -52,6 +52,9 @@ class LiveStart(CameraConnection):
     config: AnalysisSettings = Field(default_factory=AnalysisSettings)
     use_saved_credentials: bool = False
     save_profile: bool = True
+    # Sound from another stream (with its credentials): an IP camera's picture with a
+    # sensor node's microphone. None: sound comes from url like the picture.
+    audio_url: SecretStr | None = None
 
 
 class CameraProfileWrite(CameraConnection):
@@ -83,3 +86,5 @@ class LiveState(BaseModel):
     metrics: dict[str, str | int | float] = Field(default_factory=dict)
     messages: list[str] = Field(default_factory=list)
     audio_status: str = "idle"
+    # Detection paused for camera work since this time (ISO), else None.
+    detection_paused_since: str | None = None

@@ -28,14 +28,30 @@ describe("browser display preferences", () => {
           secret: "discard",
         }),
       ),
-    ).toEqual({ theme: "light", textSize: "standard", contrast: "high" });
+    ).toEqual({
+      theme: "light",
+      textSize: "standard",
+      contrast: "high",
+      navigation: "side",
+    });
     expect(
       parseDisplayPreferences('{"theme":"system","textSize":"extra-large"}'),
     ).toEqual({
       theme: "system",
       textSize: "extra-large",
       contrast: "standard",
+      navigation: "side",
     });
+  });
+
+  it("keeps the side navigation unless the top bar was chosen", () => {
+    expect(DEFAULT_DISPLAY.navigation).toBe("side");
+    expect(parseDisplayPreferences('{"navigation":"top"}').navigation).toBe(
+      "top",
+    );
+    expect(parseDisplayPreferences('{"navigation":"left"}').navigation).toBe(
+      "side",
+    );
   });
 
   it("keeps the interface usable when browser storage is blocked", () => {
@@ -61,6 +77,7 @@ describe("browser display preferences", () => {
       theme: "light",
       textSize: "large",
       contrast: "high",
+      navigation: "top",
     } as const;
     expect(saveDisplayPreferences(preferences)).toBe(true);
     expect(readDisplayPreferences()).toEqual(preferences);
@@ -92,11 +109,13 @@ describe("browser display preferences", () => {
       theme: "system",
       textSize: "extra-large",
       contrast: "high",
+      navigation: "top",
     });
     expect(dataset).toEqual({
       theme: "dark",
       textSize: "extra-large",
       contrast: "high",
+      nav: "top",
     });
     expect(setAttribute).toHaveBeenCalledWith("content", "#14191e");
   });

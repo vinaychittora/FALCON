@@ -46,6 +46,28 @@ def open_access(request: Request) -> dict:
         raise HTTPException(409, str(exc)) from None
 
 
+class LanChange(BaseModel):
+    enabled: bool | None = None
+    renew_code: bool = False
+
+
+def lan_manager(request: Request):  # type: ignore[no-untyped-def]
+    if request.scope.get("falcon.remote_authenticated"):
+        raise HTTPException(403, "Manage phone access from the FALCON computer itself.")
+    return request.app.state.lan
+
+
+@router.get("/lan")
+def lan_status(request: Request) -> dict:
+    """Phone access on the home network: on/off, access code and addresses to type."""
+    return lan_manager(request).status()
+
+
+@router.put("/lan")
+def lan_update(body: LanChange, request: Request) -> dict:
+    return lan_manager(request).update(enabled=body.enabled, renew_code=body.renew_code)
+
+
 @router.post("/close")
 def close_access(request: Request) -> dict:
     try:

@@ -1,6 +1,9 @@
 """Signed HTTP control API for the inference node, plus a public status page.
 
 Public (no secrets): GET /  and  GET /api/v1/info
+Hotspot and this node only: GET /mobile (alias /focus: phone camera-setup page),
+/focus.json, /focus.jpg, POST /focus/reset, GET/POST /focus/controls (picture controls),
+GET/POST /focus/extras (hotspot, bluetooth, heat)
 Signed (pairing key): everything else, see docs/SENSOR_NODE.md for the list.
 """
 
@@ -11,6 +14,7 @@ import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from falcon_node import focus
 from falcon_node.agent import Agent
 from falcon_node.auth import AuthError
 
@@ -80,7 +84,9 @@ pairing key printed by the installer (also in <code>/etc/falcon-node/node.conf</
 </main></body></html>"""
 
 
-def make_handler(agent: Agent) -> type[BaseHTTPRequestHandler]:
+def make_handler(agent: Agent, helper: focus.FocusHelper | None = None) -> type[BaseHTTPRequestHandler]:
+    focus_helper = helper or focus.FocusHelper(agent.config.ffmpeg, agent.config.rtsp_port)
+
     class Handler(BaseHTTPRequestHandler):
         server_version = "falcon-node"
         sys_version = ""
@@ -126,11 +132,18 @@ def make_handler(agent: Agent) -> type[BaseHTTPRequestHandler]:
         def _handle(self) -> None:
             try:
                 body = self._body()
+                self._posted = body
                 if self.command == "GET" and self.path == "/":
                     self._send(200, status_page(agent), "text/html")
                     return
                 if self.command == "GET" and self.path == "/api/v1/info":
                     self._send(200, agent.info())
+                    return
+                if self.path.split("?")[0] in {
+                    "/mobile", "/focus", "/focus.json", "/focus.jpg", "/focus/reset", "/focus/controls",
+                    "/focus/extras",
+                }:
+                    self._focus(self.path.split("?")[0])
                     return
                 if not self.path.startswith("/api/v1/"):
                     raise RequestError(404, "Not found")
@@ -144,6 +157,47 @@ def make_handler(agent: Agent) -> type[BaseHTTPRequestHandler]:
                 log.exception("Request failed")
                 self._send(500, {"detail": "The sensor node could not complete the request"})
 
+        def _focus(self, path: str) -> None:
+            # The live picture is shown only on the node's hotspot (and to the node
+            # itself), never to the home network without FALCON's pairing key.
+            if not focus.allowed(self.client_address[0]):
+                raise RequestError(403, "The focus helper is available on the node's hotspot only")
+            if self.command == "POST" and path == "/focus/reset":
+                focus_helper.reset_best()
+                self._send(200, focus_helper.state())
+                return
+            if path == "/focus/extras":
+                # Node power on the phone page: hotspot, bluetooth, heat.
+                if self.command == "POST":
+                    self._send(200, agent.update_extra(self._json(self._posted)))
+                else:
+                    self._send(200, agent.extras_status())
+                return
+            if path == "/focus/controls":
+                # The same picture controls as FALCON's Live page, for setting up on the hotspot.
+                if self.command == "POST":
+                    self._send(200, agent.update_camera_picture(self._json(self._posted)))
+                else:
+                    self._send(200, agent.camera_picture())
+                return
+            if self.command != "GET":
+                raise RequestError(405, "Method not allowed")
+            focus_helper.touch()
+            if path in {"/mobile", "/focus"}:
+                self._send(200, focus.mobile_page(agent.config.name), "text/html")
+            elif path == "/focus.json":
+                self._send(200, {**focus_helper.state(), "node": focus.node_summary(agent.status())})
+            else:
+                jpeg = focus_helper.zoom_jpeg if "zoom=1" in self.path else focus_helper.jpeg
+                if jpeg is None:
+                    raise RequestError(503, "Waiting for the camera picture")
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(jpeg)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(jpeg)
+
         def _route(self, method: str, path: str, data: dict[str, Any]) -> Any:
             if method == "GET" and path == "/status":
                 return agent.status()
@@ -156,6 +210,14 @@ def make_handler(agent: Agent) -> type[BaseHTTPRequestHandler]:
             if method == "PUT" and path == "/camera":
                 agent.update_camera(data)
                 return agent.status()
+            if method == "GET" and path == "/system/extras":
+                return agent.extras_status()
+            if method == "PUT" and path == "/system/extras":
+                return agent.update_extra(data)
+            if method == "GET" and path == "/camera/controls":
+                return agent.camera_picture()
+            if method == "PUT" and path == "/camera/controls":
+                return agent.update_camera_picture(data)
             if method == "PUT" and path == "/microphone":
                 agent.update_microphone(data)
                 return agent.status()

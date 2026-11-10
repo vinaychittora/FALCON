@@ -26,6 +26,18 @@ export function focusDistance(dioptres: number): string {
 
 const FIELDS: Field[] = [
   {
+    key: "night_mode",
+    label: "Night picture",
+    type: "select",
+    quick: true,
+    options: [
+      ["auto", "Automatic: greyscale under IR light"],
+      ["colour", "Always colour"],
+      ["mono", "Always greyscale"],
+    ],
+    help: "This webcam has no IR-cut filter, so its colours are only right by day. At night its IR lights turn the picture magenta; Automatic switches to greyscale then, and back at dawn. Detection, clips and Live all get the same picture.",
+  },
+  {
     key: "focus_mode",
     label: "Focus",
     type: "select",
@@ -86,6 +98,16 @@ const FIELDS: Field[] = [
     quick: true,
   },
   { key: "hflip", label: "Mirror horizontally", type: "toggle" },
+  {
+    key: "video_codec",
+    label: "Video encoding",
+    type: "select",
+    options: [
+      ["mjpeg", "On this PC (camera frames passed through)"],
+      ["h264", "On the sensor node (H.264)"],
+    ],
+    help: "On this PC: the node sends the webcam's own frames without re-encoding, so it runs much cooler (about 66 °C instead of 76 °C here) and FALCON decodes them on the PC. Needs about 10 Mbit/s at 1280×960 and 10 fps, so a wired network is best. On the sensor node: the node encodes H.264 (about 2.5 Mbit/s) using about 1.5 CPU cores. Changing it restarts the stream for a few seconds.",
+  },
   { key: "resolution", label: "Resolution", type: "select", options: [] },
   {
     key: "framerate",
@@ -223,9 +245,15 @@ export default function CameraControls({
   );
   const fields = FIELDS.filter(
     (field) => controls.has(field.key) && (!quick || field.quick),
-  ).filter(
-    (field) => field.key !== "lens_position" || values.focus_mode === "manual",
-  );
+  )
+    .filter(
+      (field) =>
+        field.key !== "lens_position" || values.focus_mode === "manual",
+    )
+    // Pass-through sends the camera's frames as they are: no bitrate to choose.
+    .filter(
+      (field) => field.key !== "bitrate_kbps" || values.video_codec !== "mjpeg",
+    );
 
   async function apply() {
     setBusy(true);

@@ -5,6 +5,7 @@ import urllib.request
 from collections.abc import Iterator
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -46,6 +47,13 @@ def test_usb_webcam_relay_and_audio_only_pipelines() -> None:
     webcam = media.Camera("v4l2", "/dev/video0", "USB camera")
     (command,) = media.build_pipeline(webcam, media.CameraSettings(), None, media.MicrophoneSettings(), PUBLISH)
     assert command[command.index("-f") + 1] == "v4l2" and "libx264" in command and "-af" not in command
+    assert "-input_format" not in command
+    mjpeg_webcam = media.Camera("v4l2", "/dev/video0", "USB camera", "mjpeg")
+    (command,) = media.build_pipeline(mjpeg_webcam, media.CameraSettings(), None, media.MicrophoneSettings(), PUBLISH)
+    assert command[command.index("-input_format") + 1] == "mjpeg"
+    # The output rate is forced, since webcams may deliver more frames than requested.
+    assert command[command.index("-r") + 1] == str(media.CameraSettings().framerate)
+    assert command.index("-input_format") < command.index("-i")
     relay = media.Camera("rtsp", "rtsp://user:secret@camera.example/stream1", "IP camera (relayed)")
     (command,) = media.build_pipeline(relay, media.CameraSettings(), None, media.MicrophoneSettings(), PUBLISH)
     assert "0:a:0?" in command and command[command.index("-c:v") + 1] == "copy"
@@ -55,6 +63,19 @@ def test_usb_webcam_relay_and_audio_only_pipelines() -> None:
     assert media.redact("Connection to rtsp://user:secret@camera.example/x failed") == (
         "Connection to rtsp://***@camera.example/x failed"
     )
+
+
+def test_usb_camera_controls_are_applied_only_when_valid(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(media.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(media, "run", lambda command, **kwargs: calls.append(command) or SimpleNamespace(returncode=0))
+    webcam = media.Camera("v4l2", "/dev/video0", "USB camera", "mjpeg")
+    assert media.apply_camera_controls(webcam, "sharpness=12, backlight_compensation=100")
+    assert calls == [["v4l2-ctl", "-d", "/dev/video0", "-c", "sharpness=12,backlight_compensation=100"]]
+    assert not media.apply_camera_controls(webcam, "sharpness=12; rm -rf /")  # malformed: ignored
+    assert not media.apply_camera_controls(PI_CAMERA, "sharpness=12")  # not a USB webcam
+    assert not media.apply_camera_controls(webcam, "")
+    assert len(calls) == 1
 
 
 def test_stream_server_config_allows_only_local_publishing_and_falcon_reading(tmp_path: Path) -> None:

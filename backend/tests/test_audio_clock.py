@@ -122,19 +122,34 @@ def test_continuous_samples_survive_derived_pts_jumps_and_tcp_bursts() -> None:
     assert clock.metrics()["audio_sample_rate"] == 8000
 
 
-def test_real_receive_and_sample_coverage_gaps_reset_partial_window() -> None:
+def test_receive_gap_resets_but_sample_shortfall_keeps_the_window() -> None:
     clock = AudioReceiveClock()
     assert observe(clock, 0) is None
     assert observe(clock, 0.128, 0.128) is None
     assert observe(clock, 2.5, 0.256) == "receive gap"
     assert clock.metrics()["audio_last_gap_receive_ms"] == 2372.0
     assert observe(clock, 2.628, 0.384) is None
-    # Neither individual pause reaches the hard two-second timeout, but decoded
-    # sample duration no longer covers elapsed receiving time within tolerance.
+    # Neither pause reaches the two-second break, but fewer samples arrived than
+    # time passed: counted as a shortfall, the partial window is kept.
     assert observe(clock, 3.156, 0.512) is None
-    assert observe(clock, 3.684, 0.640) == "received audio sample coverage gap"
-    assert clock.resets == 2
-    assert clock.last_gap_coverage_ms == 800.0
+    assert observe(clock, 3.684, 0.640) is None
+    assert clock.resets == 1
+    assert clock.shortfalls == 1
+    assert clock.last_shortfall_ms == 800.0
+
+
+def test_slow_sound_card_never_discards_windows() -> None:
+    """Overnight case: the node delivered ~43.6k samples/s for a declared 48 kHz."""
+    clock = AudioReceiveClock()
+    frame = 1024 / 48000
+    received = 0.0
+    for _ in range(int(600 / frame)):  # ten minutes of AAC frames
+        assert clock.observe(
+            samples=1024, sample_rate=48000, received=received, pts=None, format_key="fltp/mono",
+        ) is None
+        received += frame * 48000 / 43600
+    assert clock.resets == 0
+    assert clock.shortfalls > 50
 
 
 def test_format_change_resets_window_and_new_connection_discards_old_clock() -> None:

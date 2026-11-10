@@ -17,11 +17,13 @@ from app.api import (
     remote,
     reviews,
     sensors,
+    summary,
     taxa,
     test_sessions,
     videos,
 )
 from app.config import Settings, settings
+from app.lan_access import LanAccessService
 from app.media.probe import VideoLibrary
 from app.nodes.service import NodeManager
 from app.nodes.store import NodeStore
@@ -70,7 +72,8 @@ def create_app(config: Settings | None = None) -> FastAPI:
 
     app.add_middleware(LocalRequestPolicyMiddleware, upload_limit_bytes=config.upload_limit_bytes)
     app.state.remote = RemoteAccessService(config.data_dir)
-    app.add_middleware(RemoteAccessMiddleware, service=app.state.remote)
+    app.state.lan = LanAccessService(config.data_dir)
+    app.add_middleware(RemoteAccessMiddleware, service=app.state.remote, lan=app.state.lan)
     app.state.config = config
     app.state.database = Database(config.data_dir / "falcon.sqlite3")
     app.state.sensors = SensorHistoryProvider(
@@ -94,6 +97,9 @@ def create_app(config: Settings | None = None) -> FastAPI:
         NodeStore(app.state.database, app.state.cameras), app.state.sensors.ingest, app.state.live.state,
     )
     app.state.sensors.preferred = app.state.nodes.preferred_sensor_id
+    app.state.live.night_mode = app.state.nodes.night_mode
+    app.state.live.restart_stream = app.state.nodes.restart_observed_stream
+    app.state.live.node_temperature = app.state.nodes.temperature
     app.state.appliance = ApplianceService(config, app.state.cameras, app.state.live, nodes=app.state.nodes)
     app.include_router(evidence.router)
     app.include_router(exports.router)
@@ -101,6 +107,7 @@ def create_app(config: Settings | None = None) -> FastAPI:
     app.include_router(remote.router)
     app.include_router(live.router)
     app.include_router(reviews.router)
+    app.include_router(summary.router)
     app.include_router(jobs.router)
     app.include_router(configuration.router)
     app.include_router(taxa.router)

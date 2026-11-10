@@ -21,6 +21,8 @@ class AudioReceiveClock:
         self.last_reset_reason = "none"
         self.last_gap_receive_ms = 0.0
         self.last_gap_coverage_ms = 0.0
+        self.shortfalls = 0
+        self.last_shortfall_ms = 0.0
         self.begin_connection()
 
     def begin_connection(self) -> None:
@@ -65,7 +67,15 @@ class AudioReceiveClock:
             elif received_delta > max(2.0, duration + 0.75):
                 reset = "receive gap"
             elif deficit > 0.75:
-                reset = "received audio sample coverage gap"
+                # A source that delivers steadily fewer samples than its declared rate
+                # (a sound card whose clock runs slow, or one that drops samples while
+                # busy) is not a break in the sound: the window keeps collecting and only
+                # the coverage comparison is re-anchored. Discarding the window here
+                # starved BirdNET overnight (one window in minutes instead of ~400/hour).
+                self.shortfalls += 1
+                self.last_shortfall_ms = round(deficit * 1000, 3)
+                self._anchor_received = received
+                self._covered_seconds = 0.0
         if reset is not None or self._last_received is None:
             self._anchor_received = received
             self._covered_seconds = 0.0
@@ -92,5 +102,7 @@ class AudioReceiveClock:
             "audio_last_gap_reason": self.last_reset_reason,
             "audio_last_gap_receive_ms": self.last_gap_receive_ms,
             "audio_last_gap_coverage_ms": self.last_gap_coverage_ms,
+            "audio_sample_shortfalls": self.shortfalls,
+            "audio_last_shortfall_ms": self.last_shortfall_ms,
             "audio_clock": "decoded samples anchored to receive time; demuxer PTS diagnostic only",
         }

@@ -6,9 +6,9 @@ import { indexTaxonNames } from "./api/names";
 import { listNodes } from "./api/nodes";
 import AnalysisDetails, { type SystemTab } from "./components/AnalysisDetails";
 import DisplayPreferences from "./components/DisplayPreferences";
+import LiveListen from "./ui/LiveListen";
 import Icon, { FalconMark, type IconName } from "./components/Icon";
 import Inspector from "./components/Inspector";
-import InstallApp from "./components/InstallApp";
 import { TaxonNamesContext } from "./components/TaxonNames";
 import { usePoll } from "./hooks/usePoll";
 import ExportPage from "./pages/ExportPage";
@@ -17,6 +17,7 @@ import LivePage, { liveStatus } from "./pages/LivePage";
 import MediaTestsPage from "./pages/MediaTestsPage";
 import ReviewPage from "./pages/ReviewPage";
 import SensorsPage from "./pages/SensorsPage";
+import SummaryPage from "./pages/SummaryPage";
 import Taxa, { type TaxaCache } from "./pages/Taxa";
 import type { Config, Detection, LiveState, Models } from "./types";
 import Pill from "./ui/Pill";
@@ -25,6 +26,7 @@ import "./app.css";
 export type Page =
   | "live"
   | "review"
+  | "summary"
   | "sensors"
   | "export"
   | "media"
@@ -49,6 +51,12 @@ export const PAGES: {
     label: "Review",
     icon: "check",
     hint: "Confirm, correct or discard animal visits",
+  },
+  {
+    page: "summary",
+    label: "Summary",
+    icon: "list",
+    hint: "Species counts and observation sessions",
   },
   {
     page: "sensors",
@@ -167,12 +175,17 @@ export default function App() {
 
   const navigate = useCallback((next: string) => {
     const target = pageFromHash(next);
-    window.location.hash = `#/${target}`;
+    const query = next.includes("?") ? "?" + next.split("?")[1] : "";
+    window.location.hash = `#/${target}${query}`;
     setPage(target);
     setMenuOpen(false);
   }, []);
 
+  // Saving is allowed while observing: FALCON restarts the observation (a few seconds)
+  // so the new settings apply at once.
+  const [savingConfig, setSavingConfig] = useState(false);
   async function saveConfig() {
+    setSavingConfig(true);
     try {
       setConfig(
         await api<Config>("/config", {
@@ -180,9 +193,15 @@ export default function App() {
           body: JSON.stringify(config),
         }),
       );
-      setNotice("Analysis settings saved.");
+      setNotice(
+        liveBusy
+          ? "Analysis settings saved. Observation restarted with the new settings."
+          : "Analysis settings saved.",
+      );
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setSavingConfig(false);
     }
   }
 
@@ -233,7 +252,6 @@ export default function App() {
             ))}
           </nav>
           <div className="sidebar-foot">
-            <InstallApp />
             <DisplayPreferences />
             <small>FALCON 1.0 · Vinay Chittora</small>
           </div>
@@ -255,6 +273,8 @@ export default function App() {
               <Icon name="menu" size={20} />
             </button>
             <span className="status-page">{current.label}</span>
+            {/* While listening, a small switch here keeps it controllable from any page. */}
+            <LiveListen compact />
             <button
               className="status-item"
               onClick={() => navigate("live")}
@@ -329,6 +349,7 @@ export default function App() {
                 revision={revision}
               />
             )}
+            {page === "summary" && <SummaryPage onNavigate={navigate} />}
             {page === "sensors" && <SensorsPage onNavigate={navigate} />}
             {page === "export" && <ExportPage />}
             {page === "media" && (
@@ -373,7 +394,7 @@ export default function App() {
                   models={models.data}
                   tab={systemTab}
                   onTab={setSystemTab}
-                  busy={liveBusy}
+                  busy={savingConfig}
                   onConfig={setConfig}
                   onSave={() => void saveConfig()}
                 />

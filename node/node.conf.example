@@ -14,12 +14,15 @@ API_PORT=8780
 RTSP_PORT=8554
 
 # What is attached. "auto" finds it; "off" ignores it.
-#   CAMERA      auto | rpicam | v4l2:/dev/video0 | off | an IP camera's RTSP address to relay
+#   CAMERA      auto | rpicam | usb | v4l2:/dev/video0 | off | an IP camera's RTSP address to relay
 #               (rtsp:// then user:password@camera-address/path)
 #   MICROPHONE  auto | alsa:plughw:CARD=Zero,DEV=0 | off   (the audio HAT is card "Zero")
 #   CLIMATE     auto | bme280 | bme280:0x77 | off           (BME280 at I2C 0x76 or 0x77)
 #   RAIN        auto | gpio:17 | off                        (rain controller DO wire)
 CAMERA=auto
+# USB webcam picture controls applied at every start (list them with: v4l2-ctl -L),
+# for example CAMERA_CONTROLS=sharpness=12,backlight_compensation=100. Empty: camera defaults.
+CAMERA_CONTROLS=
 MICROPHONE=auto
 MICROPHONE_CHANNELS=2
 CLIMATE=auto
@@ -29,3 +32,11 @@ RAIN_WET_WHEN_LOW=true
 
 # Seconds between weather readings.
 READING_INTERVAL_SECONDS=30
+
+# Heat protection (°C). At THERMAL_STOP_C the stream pauses (weather and rain carry on)
+# until the CPU cools to THERMAL_RESUME_C. With THERMAL_PAUSE_C lower than THERMAL_STOP_C
+# only the camera pauses first and sound carries on. 85 is the Raspberry Pi's rated
+# maximum; its firmware already slows the CPU from 80.
+THERMAL_PAUSE_C=84
+THERMAL_STOP_C=84
+THERMAL_RESUME_C=75

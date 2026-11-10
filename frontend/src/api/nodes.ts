@@ -36,6 +36,75 @@ export interface CameraSettings {
   hdr: boolean;
   hflip: boolean;
   vflip: boolean;
+  /** Night picture: greyscale while IR light makes a webcam's picture magenta. */
+  night_mode?: "auto" | "colour" | "mono";
+  /** h264: the node encodes; mjpeg: the webcam's frames pass through, FALCON decodes them. */
+  video_codec?: "h264" | "mjpeg";
+}
+
+export interface PowerFlags {
+  under_voltage_now: boolean;
+  throttled_now: boolean;
+  under_voltage_since_boot: boolean;
+  throttled_since_boot: boolean;
+  /** The Pi firmware's own heat protection (soft limit at 80 °C). */
+  soft_temp_limit_now?: boolean;
+  frequency_capped_now?: boolean;
+}
+
+export interface ThermalState {
+  enabled: boolean;
+  state: "normal" | "camera paused" | "stream stopped";
+  temperature_c: number | null;
+  pause_c: number;
+  stop_c: number;
+  resume_c: number;
+  since: string | null;
+  events: number;
+}
+
+export interface NodeExtra {
+  name: "hotspot" | "bluetooth";
+  label: string;
+  note: string;
+  available: boolean;
+  on: boolean;
+  at_boot: boolean;
+}
+
+export interface NodeExtras {
+  extras: NodeExtra[];
+  thermal: ThermalState;
+  cpu_temperature_c: number | null;
+  power: PowerFlags | null;
+}
+
+export const nodeExtras = (id: string) =>
+  api<NodeExtras>(`/nodes/${encodeURIComponent(id)}/extras`);
+
+export const setNodeExtra = (
+  id: string,
+  change: { name: NodeExtra["name"]; on?: boolean; at_boot?: boolean },
+) =>
+  api<NodeExtras>(`/nodes/${encodeURIComponent(id)}/extras`, {
+    method: "PUT",
+    body: JSON.stringify(change),
+  });
+
+/** "Paused: node too hot (86 °C), resumes below 75 °C", or null when running normally. */
+export function thermalNotice(
+  thermal: ThermalState | undefined,
+  temperature?: number | null,
+): string | null {
+  if (!thermal || thermal.state === "normal") return null;
+  const now = thermal.temperature_c ?? temperature;
+  const what = thermal.state === "camera paused" ? "Camera paused" : "Paused";
+  return `${what}: node too hot${now != null ? ` (${Math.round(now)} °C)` : ""}, resumes below ${thermal.resume_c} °C`;
+}
+
+/** The Pi's firmware is slowing the processor to protect itself from heat right now. */
+export function slowedByHeat(power: PowerFlags | null | undefined): boolean {
+  return Boolean(power?.soft_temp_limit_now || power?.throttled_now);
 }
 
 export interface NodeStatus {
@@ -62,15 +131,19 @@ export interface NodeStatus {
     disk_free_bytes: number;
     disk_total_bytes: number;
     wifi_signal_dbm: number | null;
-    power: {
-      under_voltage_now: boolean;
-      throttled_now: boolean;
-      under_voltage_since_boot: boolean;
-      throttled_since_boot: boolean;
-    } | null;
+    power: PowerFlags | null;
+  };
+  /** The node's heat protection (absent on nodes installed before it existed). */
+  thermal?: ThermalState;
+  /** Added by FALCON: its own clock speed measured against this node's uptime. */
+  falcon_clock?: {
+    drift_percent: number | null;
+    measured_seconds: number;
+    warning: boolean;
   };
   stream: {
-    state: "off" | "starting" | "streaming" | "retrying" | "no sources";
+    state:
+      "off" | "starting" | "streaming" | "retrying" | "no sources" | "too hot";
     since: string | null;
     restarts: number;
     error: string | null;
@@ -103,6 +176,8 @@ export interface SensorNode {
   name: string;
   address: string;
   audio_analysis: boolean;
+  /** "node": this node's camera; "ip": the saved IP camera, sound still from this node. */
+  video_source?: "node" | "ip";
   created_at: string;
   updated_at: string;
   online: boolean;
@@ -128,7 +203,11 @@ export const pairNode = (address: string, pairingKey: string, name?: string) =>
 
 export const updateNode = (
   id: string,
-  changes: { name?: string; audio_analysis?: boolean },
+  changes: {
+    name?: string;
+    audio_analysis?: boolean;
+    video_source?: "node" | "ip";
+  },
 ) =>
   api<SensorNode>(`/nodes/${encodeURIComponent(id)}`, {
     method: "PATCH",
@@ -165,6 +244,38 @@ export const nodeCamera = (id: string, changes: Partial<CameraSettings>) =>
   api<SensorNode>(`/nodes/${encodeURIComponent(id)}/camera`, {
     method: "PUT",
     body: JSON.stringify(changes),
+  });
+
+/** One USB webcam picture control, as the sensor node reports it. */
+export interface PictureControl {
+  name: string;
+  type: "int" | "bool" | "menu";
+  min: number;
+  max: number;
+  step: number;
+  default: number;
+  value: number;
+  /** Greyed out by the camera, e.g. manual exposure while exposure is automatic. */
+  inactive: boolean;
+  menu?: [number, string][];
+}
+
+export interface PictureControls {
+  controls: PictureControl[];
+  saved: Record<string, number>;
+}
+
+export const nodePicture = (id: string) =>
+  api<PictureControls>(`/nodes/${encodeURIComponent(id)}/camera/controls`);
+
+/** Applies immediately on the webcam (no stream restart) and is remembered by the node. */
+export const setNodePicture = (
+  id: string,
+  change: { values: Record<string, number> } | { reset: true },
+) =>
+  api<PictureControls>(`/nodes/${encodeURIComponent(id)}/camera/controls`, {
+    method: "PUT",
+    body: JSON.stringify(change),
   });
 
 export const nodeMicrophone = (
@@ -248,6 +359,16 @@ export function streamState(node: SensorNode): {
         tone: "warn",
         detail: stream.error ?? undefined,
       };
+    case "too hot":
+      return {
+        label: "Paused (too hot)",
+        tone: "warn",
+        detail:
+          thermalNotice(
+            node.status.thermal,
+            node.status.system.cpu_temperature_c,
+          ) ?? undefined,
+      };
     default:
       return { label: "Starting", tone: "neutral" };
   }
@@ -266,9 +387,11 @@ export function nodeWarnings(status: NodeStatus | null): string[] {
     warnings.push(
       "The power supply dipped below safe voltage since the last start.",
     );
-  if (power?.throttled_now)
+  const hot = thermalNotice(status.thermal, status.system.cpu_temperature_c);
+  if (hot) warnings.push(hot);
+  else if (slowedByHeat(power))
     warnings.push(
-      "The processor is slowing down to protect itself (heat or power).",
+      "Slowed by heat: the processor is slowing down to protect itself.",
     );
   if ((status.system.cpu_temperature_c ?? 0) >= 75)
     warnings.push("The node is hot. Check shade and ventilation.");

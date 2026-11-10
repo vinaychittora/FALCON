@@ -129,7 +129,8 @@ def test_foreground_exec_uses_same_pid_and_disables_proxy_header_rewriting(
     assert server.run_foreground(tmp_path, tmp_path / "frontend") == 0
     command = execute.call_args.args[1]
     assert "--no-proxy-headers" in command
-    assert command[command.index("--host") + 1] == "127.0.0.1"
+    # All interfaces; the application's own middleware refuses other devices by default.
+    assert command[command.index("--host") + 1] == server.HOST
     assert json.loads((tmp_path / "server.json").read_text())["pid"] == os.getpid()
     assert (tmp_path / "server.json").stat().st_mode & 0o777 == 0o600
 

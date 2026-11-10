@@ -17,7 +17,7 @@ import {
   testSessionHeaders,
   type TestSession,
 } from "../api/testSessions";
-import { currentEvents, formatTime } from "../api/timeline";
+import { currentEvents, formatTime, recentEvents } from "../api/timeline";
 import { uploadMedia } from "../api/upload";
 import AnalysisActions from "../components/AnalysisActions";
 import AudioPlayer from "../components/AudioPlayer";
@@ -283,6 +283,11 @@ export default function MediaTestsPage({
   }
 
   const current = useMemo(() => currentEvents(events, time), [events, time]);
+  // Brief visits vanish from the current-position panel; keep the last 20 s reachable.
+  const recent = useMemo(
+    () => recentEvents(events, time, 20000),
+    [events, time],
+  );
   const boxesAt = useCallback(
     (ms: number) =>
       observationOverlays(currentEvents(events, ms).visual, taxonNames),
@@ -688,6 +693,8 @@ export default function MediaTestsPage({
             (video?.audio ? "Ready for analysis" : "No audio stream")
           }
           onInspect={(event) => setInspect(event)}
+          recent={recent}
+          onSeek={video?.media_kind === "image" ? undefined : doSeek}
         />
       </div>
       <ObservationHistory

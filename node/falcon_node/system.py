@@ -62,6 +62,9 @@ def throttling() -> dict[str, Any] | None:
     return {
         "under_voltage_now": bool(flags & 0x1), "throttled_now": bool(flags & 0x4),
         "under_voltage_since_boot": bool(flags & 0x10000), "throttled_since_boot": bool(flags & 0x40000),
+        # The firmware's own heat protection: clock capped (0x2) and soft limit at 80 °C (0x8).
+        "frequency_capped_now": bool(flags & 0x2), "soft_temp_limit_now": bool(flags & 0x8),
+        "soft_temp_limit_since_boot": bool(flags & 0x80000),
     }
 
 

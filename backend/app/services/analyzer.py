@@ -8,6 +8,7 @@ from uuid import uuid4
 
 from app.config import Settings
 from app.inference.birdnet import BirdNET
+from app.inference.bouts import SoundBouts
 from app.inference.classifier_models import classifier_versions
 from app.inference.pipeline import Cancelled, visual_pipeline
 from app.media.file_source import FileSource
@@ -447,6 +448,9 @@ class Analyzer:
                     checkpoint.audio_complete = True
                     job.audio_status = "completed"
                     job.metrics.update(metrics)
+                    audio = SoundBouts(
+                        config.sound_bout_gap_seconds * 1000, config.sound_bout_max_minutes * 60_000,
+                    ).assign_all(audio)
                     self.events.commit_analysis(job, checkpoint, list(audio))
                     message(f"BirdNET complete: {len(audio)} bird detections heard nearby")
                 except Cancelled:

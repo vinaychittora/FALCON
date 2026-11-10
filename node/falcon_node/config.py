@@ -48,12 +48,20 @@ class NodeConfig:
     rtsp_port: int = 8554
     mediamtx_api_port: int = 9997
     camera: str = "auto"
+    # USB webcam (V4L2) controls applied at every stream start, e.g. "sharpness=12".
+    camera_controls: str = ""
     microphone: str = "auto"
     microphone_channels: int = 2
     climate: str = "auto"
     rain: str = "auto"
     rain_wet_when_low: bool = True
     reading_interval: float = 30.0
+    # Thermal protection (°C): pause the stream just below the Pi's rated maximum and
+    # resume once cooled. Set THERMAL_STOP_C above THERMAL_PAUSE_C to pause only the
+    # camera first (sound carries on). 0 disables a level.
+    thermal_pause_c: float = 84.0
+    thermal_stop_c: float = 84.0
+    thermal_resume_c: float = 75.0
     mediamtx: str = "/opt/falcon-node/mediamtx/mediamtx"
     ffmpeg: str = "ffmpeg"
     mixer_state: str = "/opt/falcon-node/audio/da7212-onboard-mic1.state"
@@ -72,6 +80,10 @@ class NodeConfig:
         node_id = values.get("NODE_ID") or socket.gethostname()
         if not IDENTIFIER.match(node_id):
             raise SystemExit("NODE_ID may contain letters, digits and . _ : - (up to 100 characters).")
+        pause = float(values.get("THERMAL_PAUSE_C", 84))
+        stop = float(values.get("THERMAL_STOP_C", pause))
+        stop = max(pause, stop) if stop > 0 and pause > 0 else 0.0
+        resume = min(pause - 2, float(values.get("THERMAL_RESUME_C", 75))) if pause > 0 else 0.0
         return cls(
             node_id=node_id,
             name=(values.get("NODE_NAME") or "FALCON sensor node")[:80],
@@ -80,12 +92,16 @@ class NodeConfig:
             rtsp_port=int(values.get("RTSP_PORT", 8554)),
             mediamtx_api_port=int(values.get("MEDIAMTX_API_PORT", 9997)),
             camera=values.get("CAMERA", "auto"),
+            camera_controls=values.get("CAMERA_CONTROLS", ""),
             microphone=values.get("MICROPHONE", "auto"),
             microphone_channels=max(1, min(8, int(values.get("MICROPHONE_CHANNELS", 2)))),
             climate=values.get("CLIMATE", "auto"),
             rain=values.get("RAIN", "auto"),
             rain_wet_when_low=_flag(values.get("RAIN_WET_WHEN_LOW", "true")),
             reading_interval=max(5.0, float(values.get("READING_INTERVAL_SECONDS", 30))),
+            thermal_pause_c=pause,
+            thermal_stop_c=stop,
+            thermal_resume_c=resume,
             mediamtx=values.get("MEDIAMTX", cls.mediamtx),
             ffmpeg=values.get("FFMPEG", "ffmpeg"),
             mixer_state=values.get("MIXER_STATE", cls.mixer_state),
@@ -103,6 +119,10 @@ class NodeState:
         self.components = dict.fromkeys(COMPONENTS, True)
         self.camera = CameraSettings()
         self.microphone = MicrophoneSettings()
+        # USB webcam picture controls set from FALCON (name -> value), applied at every start.
+        self.picture: dict[str, int] = {}
+        # Optional extras (hotspot, bluetooth) the node starts itself at boot.
+        self.extras_at_boot: dict[str, bool] = {}
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError):
@@ -114,6 +134,14 @@ class NodeState:
             })
             self.camera = CameraSettings().updated(data.get("camera", {}), kind="any")
             self.microphone = MicrophoneSettings().updated(data.get("microphone", {}))
+            self.picture = {
+                str(name): int(value) for name, value in data.get("picture", {}).items()
+                if isinstance(value, int) and not isinstance(value, bool)
+            }
+            self.extras_at_boot = {
+                str(name): value for name, value in data.get("extras_at_boot", {}).items()
+                if isinstance(value, bool)
+            }
         except (ValueError, TypeError, AttributeError):
             pass  # A damaged state file falls back to defaults rather than stopping the node.
 
@@ -122,6 +150,7 @@ class NodeState:
             return {
                 "stream_enabled": self.stream_enabled, "components": dict(self.components),
                 "camera": self.camera.public(), "microphone": asdict(self.microphone),
+                "picture": dict(self.picture), "extras_at_boot": dict(self.extras_at_boot),
             }
 
     def save(self) -> None:

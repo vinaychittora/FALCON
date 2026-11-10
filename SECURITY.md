@@ -70,6 +70,13 @@ startup it disables optional Hugging Face telemetry, implicit use of locally sav
 Hugging Face tokens, Hub update checks, and Ultralytics online probes/reporting and
 automatic package installation before those libraries are imported. These settings
 are process-local privacy controls, not a firewall or a promise of no network use.
+
+People in the camera's view are not observations: their boxes are masked in the live
+preview, review images and saved clips, and seconds with human voices are silenced in
+saved sound clips. This is a best-effort mask driven by the detector and BirdNET, not a
+guarantee that no person or voice is ever retained. The video mask is on by default and
+can be switched off in Settings ("Mask people in video"); people are then shown as filmed
+but are still never recorded as observations, and voices are still silenced.
 Existing running processes need a restart to pick up changed startup policy.
 
 Expected outbound application traffic is limited to these functions:

@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from starlette.responses import FileResponse
 from starlette.types import Receive, Scope, Send
 
+from app.media.sound_cleanup import clean, read_wav, spectrogram_png, write_wav
 from app.schemas_evidence import EvidencePage, EvidenceRecord
 from app.services.evidence_export import InsufficientExportSpace, build_evidence_archive
 from app.storage.evidence import EvidenceStore
@@ -78,3 +79,40 @@ def evidence_media(evidence_id: str, request: Request) -> FileResponse:
     except (OSError, ValueError) as exc:
         raise HTTPException(404, "Evidence media is unavailable") from exc
     return FileResponse(path, media_type=record.mime_type, headers={"Cache-Control": "no-store"})
+
+
+def _sound_derivative(request: Request, evidence_id: str, kind: Literal["clean", "spectrogram"]) -> Path:
+    """A cleaned copy or a spectrogram of a saved sound clip, made once and cached
+    beside it. The saved clip itself is never changed."""
+    store: EvidenceStore = request.app.state.evidence
+    try:
+        record = store.get(evidence_id)
+        source = store.media_path(record)
+    except KeyError as exc:
+        raise HTTPException(404, "Evidence not found") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(404, "Evidence media is unavailable") from exc
+    if record.media_kind != "audio":
+        raise HTTPException(400, "Only sound clips can be cleaned")
+    target = source.with_name(f"{source.stem}.{'clean.wav' if kind == 'clean' else 'spectrogram.png'}")
+    if not target.exists() or target.stat().st_mtime < source.stat().st_mtime:
+        samples, rate = read_wav(source.read_bytes())
+        data = write_wav(clean(samples, rate), rate) if kind == "clean" else spectrogram_png(samples, rate)
+        temporary = target.with_name(f".{target.name}.tmp")
+        temporary.write_bytes(data)
+        temporary.replace(target)
+    return target
+
+
+@router.get("/{evidence_id}/clean.wav")
+def clean_sound(evidence_id: str, request: Request) -> FileResponse:
+    """The sound clip with rumble and steady noise turned down and the level raised."""
+    return FileResponse(_sound_derivative(request, evidence_id, "clean"), media_type="audio/wav",
+                        headers={"Cache-Control": "no-store"})
+
+
+@router.get("/{evidence_id}/spectrogram.png")
+def sound_spectrogram(evidence_id: str, request: Request) -> FileResponse:
+    """A spectrogram (0-8 kHz) of the saved sound clip."""
+    return FileResponse(_sound_derivative(request, evidence_id, "spectrogram"), media_type="image/png",
+                        headers={"Cache-Control": "no-store"})

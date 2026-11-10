@@ -42,7 +42,22 @@ class AnalysisSettings(BaseModel):
     sample_fps: float = Field(default=2, ge=0.5, le=5)
     detector_threshold: float = Field(default=0.25, ge=0.01, le=0.99)
     species_threshold: float = Field(default=0.22, ge=-1, le=1)
+    # Below the species threshold, a lower bar still allows "unknown bird / mammal"
+    # when the strongest candidates agree on the group.
+    group_threshold: float = Field(default=0.15, ge=-1, le=1)
     ambiguity_margin: float = Field(default=0.025, ge=0, le=1)
+    # "Likely" needs more than a species name: on 8 Nov the bowl and a dead leaf were
+    # named at similarity 0.38-0.41 with a gap under 0.02, real birds at 0.50-0.55.
+    likely_similarity: float = Field(default=0.45, ge=-1, le=1)
+    # Last night's cat (a real visit) held a gap of 0.02-0.03; the bowl and leaf <= 0.02.
+    likely_margin: float = Field(default=0.02, ge=0, le=1)
+    # Top-five candidates from this many groups (frog, otter, bee...) = not an animal
+    # the model recognises: named "Unidentified animal", never a species.
+    mixed_groups: int = Field(default=3, ge=2, le=5)
+    # Scenery spots (the bowl) not hit for this long are forgotten (1 hour to 30 days).
+    scenery_forget_hours: float = Field(default=48.0, ge=1, le=720)
+    # A visit is "Likely" only when this many sampled frames agree on the species.
+    likely_frames: int = Field(default=3, ge=1, le=20)
     detector_size: Literal[320, 640, 960] = 640
     max_proposals: int = Field(default=12, ge=1, le=50)
     fixed_camera: bool = False
@@ -50,6 +65,27 @@ class AnalysisSettings(BaseModel):
     roi: BBox = (0, 0, 1, 1)
     audio_enabled: bool = True
     birdnet_confidence: float = Field(default=0.5, ge=0.01, le=0.99)
+    # Repeated calls of one species form one visit until this much silence passes,
+    # or the visit reaches the maximum length.
+    sound_bout_gap_seconds: int = Field(default=120, ge=0, le=1800)
+    sound_bout_max_minutes: int = Field(default=15, ge=1, le=120)
+    # Saved clip per visit (video and sound): from this long before the first detected
+    # frame or call to this long after it. An animal that stays gets back-to-back clips.
+    # Cut this much off the left and right of the camera picture (percent of the width),
+    # e.g. mounting posts at the edges of a wide 16:9 mode. Applies to Live, detection
+    # and clips alike, so box positions stay consistent.
+    crop_left_percent: int = Field(default=0, ge=0, le=30)
+    crop_right_percent: int = Field(default=0, ge=0, le=30)
+    clip_pre_seconds: int = Field(default=5, ge=1, le=12)
+    clip_post_seconds: int = Field(default=5, ge=2, le=20)
+    # Camera hunting between day and night: hold detections while the picture
+    # brightness jumps by more than flicker_step this many times a minute.
+    flicker_step: int = Field(default=20, ge=5, le=128)
+    flicker_flips_per_minute: int = Field(default=6, ge=2, le=120)
+    flicker_hold_seconds: int = Field(default=60, ge=10, le=600)
+    # A box found in nearly the same place for most of this many minutes is part of the
+    # scene (the water bowl, a stone) and is no longer recorded. 0 turns this off.
+    still_object_minutes: int = Field(default=3, ge=0, le=60)
     site_lat: float | None = Field(default=None, ge=-90, le=90)
     site_lon: float | None = Field(default=None, ge=-180, le=180)
     recording_date: date | None = None
@@ -57,6 +93,9 @@ class AnalysisSettings(BaseModel):
     device: Literal["auto", "cuda", "cpu"] = "auto"
     classifier_mode: ClassifierMode = "bioclip_2"
     log_non_wildlife: bool = False
+    # Paint people gray in previews, review images and saved clips. Off shows them as
+    # filmed; they are still never recorded as observations.
+    mask_people: bool = True
     min_crop_side: int = Field(default=32, ge=8, le=256)
     min_sharpness: float = Field(default=12, ge=0, le=500)
     crops_per_track: int = Field(default=3, ge=1, le=8)
@@ -120,6 +159,9 @@ class ModelEvidence(BaseModel):
     unknown_reason: str | None = None
 
 
+Certainty = Literal["likely", "probable", "possible", "unknown"]
+
+
 class Classification(BaseModel):
     broad_group: str = "organism"
     scientific_name: str | None = None
@@ -132,6 +174,13 @@ class Classification(BaseModel):
     top_k: list[Candidate] = Field(default_factory=list)
     model_evidence: list[ModelEvidence] = Field(default_factory=list)
     consensus: Literal["single", "agree", "disagree", "insufficient_evidence"] = "single"
+    # How far the evidence goes: likely (a species, green), probable (a few look-alikes,
+    # often one genus, orange), possible (a faint best guess, red), unknown (gray).
+    certainty: Certainty = "unknown"
+    # Shared genus of the look-alikes, when they agree on one.
+    genus: str | None = None
+    # The candidates too close to separate (the top one first).
+    contenders: list[Candidate] = Field(default_factory=list)
 
 
 class Review(BaseModel):
@@ -202,6 +251,9 @@ class VisualEvent(ObservationContext):
     models: dict[str, str]
     environment: EnvironmentReading = Field(default_factory=EnvironmentReading)
     review: Review = Field(default_factory=Review)
+    # The visit this frame belongs to (live, from 8 Nov 2026, spec Phase 1): may span
+    # several tracks or a restart. Records without it were graded by the old rules.
+    visit_id: str | None = None
 
 
 class AudioEvent(ObservationContext):
@@ -217,6 +269,8 @@ class AudioEvent(ObservationContext):
     common_name: str
     confidence: float
     model: str = "BirdNET GLOBAL 6K V2.4"
+    # Shared by repeated calls of one species heard close together: one visit.
+    bout_id: str | None = None
     models: dict[str, str]
     environment: EnvironmentReading = Field(default_factory=EnvironmentReading)
     review: Review = Field(default_factory=Review)

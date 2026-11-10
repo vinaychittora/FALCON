@@ -563,6 +563,236 @@ kbd {
   border: 0;
   background: #000;
 }
+/* Full screen sits on the picture's top-right corner, opposite the LIVE badge. */
+.live-stage {
+  position: relative;
+}
+/* Time · fps · size in the picture's bottom-left corner, styled like the LIVE badge;
+   monospace with tabular digits so it never changes width. */
+.stage-info {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 2;
+  padding: 6px 9px;
+  border-radius: 5px;
+  background: var(--media-overlay);
+  color: var(--media-text);
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.fullscreen-button {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  padding: 6px 8px;
+  background: var(--media-overlay);
+  color: var(--media-text);
+  border-color: transparent;
+}
+/* Full screen: the picture fills the screen; the switches and the status strip
+   stay along the bottom, and the detection boxes stay drawn on the picture. */
+.live-stage.is-fullscreen {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+}
+.live-stage.is-fullscreen .player.live-preview {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.live-stage.is-fullscreen .player.live-preview img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+}
+.live-stage.is-fullscreen .stage-bar,
+.live-stage.is-fullscreen .facts {
+  flex: none;
+  background: var(--surface);
+}
+.live-stage.is-fullscreen .stage-placeholder {
+  flex: 1 1 auto;
+  aspect-ratio: auto;
+}
+.sensor-links,
+.sensor-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  margin: 10px 0 0;
+}
+.sensor-tabs {
+  margin: 0 0 14px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+  /* One row; on a phone it scrolls sideways instead of wrapping. */
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.sensor-tabs a {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.sensor-link,
+.sensor-tabs a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.sensor-link:hover,
+.sensor-tabs a:hover {
+  background: var(--surface-hover);
+}
+.sensor-tabs a.active {
+  background: var(--surface-muted);
+  font-weight: 600;
+  box-shadow: inset 0 -3px 0 var(--forest);
+}
+.sensor-status {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sensor-readings {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+.sensor-readings dt {
+  color: var(--muted);
+  font-size: 0.8125rem;
+}
+.sensor-readings dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 1.25rem;
+}
+/* Live bar controls with a small options menu (Listen, Ring). */
+.bar-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.bar-options > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0 6px;
+  border-radius: 6px;
+  color: var(--muted);
+}
+.bar-options > summary::-webkit-details-marker {
+  display: none;
+}
+.bar-options[open] > summary,
+.bar-options > summary:hover {
+  background: var(--surface-hover);
+  color: var(--ink);
+}
+.bar-popover {
+  position: absolute;
+  z-index: 30;
+  bottom: calc(100% + 8px);
+  left: 0;
+  display: grid;
+  gap: 10px;
+  width: 220px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 10px 28px var(--shadow-modal);
+}
+.bar-popover label {
+  display: grid;
+  gap: 4px;
+  font-size: 0.8125rem;
+}
+.listen-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.listen-compact {
+  border: 1px solid var(--line-subtle);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.bar-error {
+  max-width: 220px;
+}
+.level-meter {
+  position: relative;
+  display: inline-block;
+  width: 64px;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--surface-hover);
+  overflow: hidden;
+}
+.level-meter i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--forest);
+  transition: width 0.1s linear;
+}
+.level-meter b {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--ink);
+}
+/* Each switch sits right next to its own label, one feature per block. */
+.node-power {
+  display: grid;
+  gap: 14px;
+  justify-items: start;
+}
+.power-item {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+  max-width: 62ch;
+}
+.power-boot {
+  margin-left: 28px;
+}
+.sensor-settings .switch-row {
+  justify-content: flex-start;
+}
+.picture-controls .is-inactive {
+  opacity: 0.5;
+}
+.small-note {
+  font-size: 0.8125rem;
+  margin: 0 0 8px;
+}
 .stage-placeholder {
   aspect-ratio: 16 / 9;
   display: flex;
@@ -592,6 +822,37 @@ kbd {
   padding: 10px 16px;
   border-top: 1px solid var(--line-subtle);
   font-size: 0.8125rem;
+  /* One fixed-height row: nothing in it changes width, so the page never jumps. */
+  flex-wrap: nowrap;
+  min-height: 52px;
+}
+/* Phones: the switches wrap onto a second row instead of running off the screen. */
+@media (max-width: 640px) {
+  .stage-bar {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    gap: 10px 14px;
+  }
+  white-space: nowrap;
+}
+.sound-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  color: var(--muted);
+}
+.sound-indicator i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--line);
+}
+.sound-indicator.tone-good i {
+  background: var(--forest);
+}
+.sound-indicator.tone-bad i {
+  background: var(--live);
 }
 .facts {
   display: grid;
@@ -616,7 +877,11 @@ kbd {
   font-family: var(--mono);
   font-size: 0.8125rem;
   font-weight: 500;
-  overflow-wrap: anywhere;
+  /* Changing values never change the strip's size. */
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .live-feed {
   display: flex;
@@ -639,6 +904,78 @@ kbd {
   min-height: 120px;
   padding: 2px;
   margin: 0 -2px;
+}
+/* Live sidebar: one line per visit; review decisions are in the detail dialog. */
+.feed-list.compact {
+  gap: 2px;
+}
+.feed-row {
+  display: grid;
+  grid-template-columns: 40px 13px minmax(0, 1fr) auto 9px 2.4em;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 48px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 0.8125rem;
+  text-align: left;
+  cursor: pointer;
+}
+.feed-row:hover,
+.feed-row:focus-visible {
+  background: var(--surface-2, rgba(127, 127, 127, 0.1));
+}
+.feed-row > svg {
+  color: var(--muted);
+}
+.feed-row-thumb {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(127, 127, 127, 0.15);
+  color: var(--muted);
+}
+.feed-row-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.feed-row strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+.feed-row time,
+.feed-score {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.feed-score {
+  text-align: right;
+}
+.feed-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--certainty-unknown);
+}
+.feed-dot-likely {
+  background: var(--certainty-likely);
+}
+/* Confirmed: the likely dot with a ring around it. */
+.feed-dot-confirmed {
+  background: var(--certainty-likely);
+  outline: 1.5px solid var(--certainty-likely);
+  outline-offset: 1.5px;
 }
 .feed-empty {
   display: flex;
@@ -1183,10 +1520,50 @@ kbd {
 .component-row.tone-muted {
   color: var(--muted);
 }
+/* Node status: three equal cards (Health | Stream | Weather), each a label/value list. */
 .node-columns {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 22px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+}
+.node-columns > div {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--surface-muted);
+}
+.node-columns .section-title {
+  margin-top: 0;
+}
+.node-columns .metrics {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.node-columns .metric {
+  flex-direction: row;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+  border-radius: 0;
+  background: none;
+  border-bottom: 1px solid var(--line-subtle);
+}
+.node-columns .metric:last-child {
+  border-bottom: 0;
+}
+.node-columns .metric span {
+  font-size: 0.8125rem;
+  white-space: nowrap;
+}
+.node-columns .metric strong {
+  text-align: right;
+}
+@media (max-width: 900px) {
+  .node-columns {
+    grid-template-columns: 1fr;
+  }
 }
 .metrics {
   display: grid;
@@ -1240,6 +1617,10 @@ kbd {
   justify-content: space-between;
   color: var(--ink);
   font-size: 0.8125rem;
+}
+/* Name-and-value labels spread apart; a switch stays right next to its own label. */
+.control label.switch-row {
+  justify-content: flex-start;
 }
 .control output {
   font-family: var(--mono);
@@ -1435,6 +1816,80 @@ kbd {
   margin: 0;
 }
 
+/* ---- Navigation along the top (Display → Navigation: Top bar) ----
+   Wide screens only; phones keep the slide-out menu. The sidebar becomes one row
+   (logo, page links with badges, Display) and the pages get the full width. */
+@media (min-width: 861px) {
+  :root[data-nav="top"] .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  :root[data-nav="top"] .sidebar {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 14px;
+    padding: 6px 18px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+  :root[data-nav="top"] .sidebar .brand {
+    padding: 2px 4px;
+    flex: none;
+  }
+  :root[data-nav="top"] .sidebar .brand small {
+    display: none;
+  }
+  :root[data-nav="top"] .sidebar .falcon-mark {
+    width: 28px;
+    height: 28px;
+  }
+  :root[data-nav="top"] .sidebar nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px;
+    min-width: 0;
+  }
+  :root[data-nav="top"] .sidebar nav a {
+    gap: 7px;
+    padding: 7px 10px;
+    font-size: 0.875rem;
+    white-space: nowrap;
+  }
+  :root[data-nav="top"] .sidebar nav a em {
+    margin-left: 2px;
+  }
+  :root[data-nav="top"] .sidebar nav a.active {
+    box-shadow: inset 0 -3px 0 var(--forest);
+  }
+  :root[data-nav="top"] .sidebar-foot {
+    margin: 0 0 0 auto;
+    flex-direction: row;
+    align-items: center;
+    flex: none;
+  }
+  :root[data-nav="top"] .sidebar-foot small {
+    display: none;
+  }
+  :root[data-nav="top"] .sidebar-foot .display-preferences summary {
+    width: auto;
+    min-height: 2.25rem;
+    padding: 0.35rem 0.7rem;
+  }
+  /* The Display panel drops down from the top bar instead of opening upward. */
+  :root[data-nav="top"] .display-popover {
+    left: auto;
+    right: 0;
+    bottom: auto;
+    top: calc(100% + 0.6rem);
+  }
+  /* The Live page uses the extra width: a larger picture, detections beside it. */
+  :root[data-nav="top"] .live-page {
+    max-width: none;
+  }
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 1180px) {
   .live-grid,
@@ -1520,4 +1975,414 @@ h1 .help-link {
 .page-help-row {
   display: flex;
   justify-content: flex-end;
+}
+
+/* ---- Setting hints ---- */
+.setting-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hint {
+  position: relative;
+  display: inline-flex;
+}
+.hint-button,
+.hint-example {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font: 600 0.6875rem/1 var(--mono);
+  cursor: help;
+}
+.hint-button:hover,
+.hint-button:focus-visible,
+.hint.open .hint-button {
+  color: var(--ink);
+  border-color: var(--forest);
+}
+.hint-text {
+  position: absolute;
+  z-index: 40;
+  left: 0;
+  top: calc(100% + 6px);
+  width: min(22rem, calc(100vw - 3rem));
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 10px 30px var(--shadow-modal);
+  font-size: 0.8125rem;
+  font-weight: 400;
+  line-height: 1.5;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: normal;
+  display: none;
+}
+.hint:hover .hint-text,
+.hint-button:focus-visible + .hint-text,
+.hint.open .hint-text {
+  display: block;
+}
+.settings-grid .roi-label {
+  margin: 10px 0 4px;
+}
+.settings-grid .setting-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- Live feed links ---- */
+.feed-links {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ---- Summary page ---- */
+.summary-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.summary-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+  min-width: 0;
+}
+.summary-tile span {
+  font-size: 0.6875rem;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.summary-tile strong {
+  font-size: 1.5rem;
+  font-family: var(--mono);
+  font-weight: 500;
+}
+.summary-tile small {
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+.summary-species,
+.summary-sessions {
+  margin-bottom: 18px;
+}
+.summary-page .card-header {
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.summary-page .table-wrap {
+  overflow-x: auto;
+}
+.summary-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+.summary-table th,
+.summary-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line-subtle);
+  vertical-align: top;
+}
+.summary-table th {
+  font-size: 0.6875rem;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+.summary-table .num {
+  text-align: right;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.summary-table td em,
+.summary-table td small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-style: italic;
+  font-family: inherit;
+}
+.summary-table td small {
+  font-style: normal;
+}
+.summary-table td small.warn {
+  color: var(--warning);
+}
+.summary-table td .pill {
+  margin-left: 8px;
+}
+.summary-table tr.active td {
+  background: color-mix(in srgb, var(--forest) 6%, transparent);
+}
+.summary-table .actions {
+  white-space: nowrap;
+}
+.summary-table .actions .text-button {
+  margin-right: 12px;
+}
+
+/* ---- Certainty colour code ---- */
+:root {
+  --certainty-likely: var(--success);
+  --certainty-probable: #e9a74a;
+  --certainty-possible: var(--danger);
+  --certainty-unknown: var(--muted);
+}
+:root[data-theme="light"] {
+  --certainty-probable: #c97b12;
+}
+.certainty,
+.certainty-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.certainty i,
+.certainty-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.certainty-likely {
+  color: var(--certainty-likely);
+}
+.certainty-probable {
+  color: var(--certainty-probable);
+}
+.certainty-possible {
+  color: var(--certainty-possible);
+}
+.certainty-unknown {
+  color: var(--certainty-unknown);
+}
+.detection-card .certainty {
+  margin: 4px 0 8px;
+  font-size: 0.8125rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.detection-card .certainty i {
+  margin-top: 5px;
+}
+.detection-card .certainty span {
+  color: var(--muted);
+  flex-basis: 100%;
+  padding-left: 15px;
+}
+.certainty-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: -4px 0 10px;
+  font-size: 0.75rem;
+}
+.encounter-card[data-certainty="likely"] .encounter-thumb {
+  box-shadow: inset 0 0 0 2px var(--certainty-likely);
+}
+.encounter-card[data-certainty="probable"] .encounter-thumb {
+  box-shadow: inset 0 0 0 2px var(--certainty-probable);
+}
+.encounter-card[data-certainty="possible"] .encounter-thumb {
+  box-shadow: inset 0 0 0 2px var(--certainty-possible);
+}
+.encounter-card[data-certainty="probable"] .pill-warn {
+  color: var(--certainty-probable);
+}
+.encounter-card[data-certainty="probable"] .pill-warn i {
+  background: var(--certainty-probable);
+}
+
+/* ---- Compact detection cards (media tests) ---- */
+.detection-card.compact {
+  padding: 14px 0;
+}
+.detection-card.compact .card-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 8px 0 2px;
+}
+.detection-card.compact h4 {
+  margin: 0;
+  font-size: 1.0625rem;
+}
+.detection-card.compact h4.certainty-likely {
+  color: var(--certainty-likely);
+}
+.detection-card.compact h4.certainty-probable {
+  color: var(--certainty-probable);
+}
+.detection-card.compact h4.certainty-possible {
+  color: var(--certainty-possible);
+}
+.detection-card.compact .card-name .certainty {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+.detection-card.compact em {
+  margin: 2px 0 0;
+}
+.detection-card.compact .metrics {
+  margin: 8px 0 0;
+  font-family: var(--mono);
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.detection-card.compact .reason {
+  margin: 6px 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.suggestions {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 5px;
+}
+.suggestions li {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(40px, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8125rem;
+  color: var(--muted);
+}
+.suggestions li span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.suggestions li small {
+  display: none;
+}
+.suggestions li.leader {
+  color: var(--ink);
+  font-weight: 550;
+}
+.suggestions li i {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--line);
+}
+.suggestions li.leader i {
+  background: var(--accent-fill);
+}
+.suggestions li code {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
+}
+.review-suggestions-open .suggestions li {
+  font-size: 0.875rem;
+  grid-template-columns: minmax(0, 1.2fr) minmax(60px, 1fr) auto;
+}
+.review-suggestions-open .suggestions li small {
+  display: inline;
+  margin-left: 6px;
+  font-style: italic;
+  color: var(--muted);
+}
+.detection-card.compact > .subtle {
+  margin-top: 6px;
+}
+.detection-card.compact details {
+  padding: 8px 0 0;
+}
+.recent-list {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+.recent-list .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.6875rem;
+}
+.recent-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 2px;
+}
+.recent-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.recent-row {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 0.8125rem;
+  text-align: left;
+}
+.recent-row:hover {
+  background: var(--surface-hover);
+}
+.recent-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+.recent-row strong {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 550;
+  color: var(--ink);
+}
+.recent-row code {
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.recent-row svg {
+  color: var(--muted);
+}
+.recent-list li .icon-button {
+  min-height: 0;
+  padding: 6px;
 }

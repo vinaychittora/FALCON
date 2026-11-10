@@ -237,6 +237,52 @@ def test_audio_fallback_is_bounded_and_reports_safe_diagnostics(
     assert "camera-password" not in repr(capture.audio_status.call_args_list)
 
 
+def test_sound_only_stream_returns_to_video_when_the_node_camera_comes_back() -> None:
+    """A sensor node publishes sound alone for a few seconds while its camera restarts."""
+    cancel = threading.Event()
+    camera_on = [False]
+    video_opens: list[bool] = []
+
+    class Container:
+        def __init__(self, video: bool) -> None:
+            self.streams = SimpleNamespace(video=[object()] if video else [], audio=[object()])
+
+        def __enter__(self) -> "Container":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+    def opened(url: str, mode: str = "r", options: dict | None = None, timeout: object = None):
+        if (options or {}).get("allowed_media_types") == "video":
+            if not camera_on[0]:
+                raise RuntimeError("no video track")  # RTSP refuses a video setup
+            video_opens.append(True)
+            cancel.set()  # the video loop was re-entered; end the test here
+            return Container(video=False)
+        probe = Container(video=camera_on[0])
+        camera_on[0] = True  # the camera comes back after the first sound-only probe
+        return probe
+
+    capture = source(cancel, open_container=opened)
+    capture._audio_loop = lambda: None  # type: ignore[method-assign]
+    capture.video_recheck_seconds = 0.01
+    sound_only: list[bool] = []
+    original = capture._run_audio_only
+
+    def run_audio_only() -> bool:
+        sound_only.append(True)
+        return original()
+
+    capture._run_audio_only = run_audio_only  # type: ignore[method-assign]
+    worker = threading.Thread(target=capture.run)
+    worker.start()
+    worker.join(timeout=5)
+    assert not worker.is_alive()
+    # Sound-only once, then the video reader connected again by itself.
+    assert sound_only and video_opens == [True]
+
+
 def test_capture_connection_failure_redacts_credentials(capfd: pytest.CaptureFixture[str]) -> None:
     cancel = threading.Event()
     av.logging.restore_default_callback()  # Same global state left by FileSource.
@@ -353,6 +399,50 @@ def test_live_audio_temporary_windows_cleaned_on_failure(
     live._listen(AnalysisSettings(), worker.taxa.read(), "session", "source", "Camera")
     assert list((tmp_path / "temp").iterdir()) == []
     assert "failed" in live.state().audio_status
+
+
+def test_pause_for_camera_work_stops_detection_until_resumed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    worker = runner(tmp_path)
+    live = LiveService(worker)
+    detected = threading.Event()
+    detector = Mock()
+    detector.detect.return_value = [Proposal((0.1, 0.1, 0.9, 0.9), 0.9)]
+    classifier = Mock()
+    classifier.scores.return_value = np.array([[0.8, 0.2, 0.1, 0.05, 0.01]], dtype=np.float32)
+    worker.registry.load = Mock(return_value=(detector, classifier))
+    worker.registry.device = "cpu"
+    real_append = worker.events.append
+
+    def recorded(event: VisualEvent) -> None:
+        real_append(event)
+        detected.set()
+
+    worker.events.append = Mock(side_effect=recorded)
+
+    def capture(self: RTSPSource) -> None:
+        sequence = 0
+        while not self.cancel.wait(0.1):
+            sequence += 1
+            frame = Frame(sequence * 100, np.random.default_rng(9).integers(0, 255, (120, 160, 3), dtype=np.uint8))
+            with self.condition:
+                self.latest = frame
+                self.sequence += 1
+                self.condition.notify_all()
+            self.preview(frame)
+            self.status("live", None)
+
+    monkeypatch.setattr(RTSPSource, "run", capture)
+    assert live.pause(True).detection_paused_since is not None
+    live.start(LiveStart(url="rtsp://camera.test/stream1", config=AnalysisSettings(audio_enabled=False)))
+    assert not detected.wait(1.5)  # picture runs, nothing is detected
+    assert live.pause(False).detection_paused_since is None
+    assert detected.wait(3), live.state().model_dump()
+    assert live.stop(wait=True).status == "stopped"
+    log = next((tmp_path / "diagnostics" / "evidence").glob("boxes-*.jsonl")).read_text()
+    assert '"event":"RESUME"' in log
 
 
 def test_live_first_positive_frame_persists_with_valid_source_key(

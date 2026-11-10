@@ -100,6 +100,22 @@ export default function DisplayPreferences() {
             <option value="extra-large">Largest</option>
           </select>
         </label>
+        <label>
+          Navigation
+          <select
+            aria-label="Navigation"
+            value={preferences.navigation}
+            onChange={(event) =>
+              update({
+                ...preferences,
+                navigation: event.target.value as Preferences["navigation"],
+              })
+            }
+          >
+            <option value="side">Side column</option>
+            <option value="top">Top bar (more room)</option>
+          </select>
+        </label>
         <label className="contrast-option">
           <input
             type="checkbox"

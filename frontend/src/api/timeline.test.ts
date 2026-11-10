@@ -1,5 +1,10 @@
-import { expect, it } from "vitest";
-import { currentEvents, formatTime, matchesObservation } from "./timeline";
+import { describe, expect, it } from "vitest";
+import {
+  currentEvents,
+  formatTime,
+  matchesObservation,
+  recentEvents,
+} from "./timeline";
 import type { Detection, VisualEvent } from "../types";
 
 it("rounds timestamps across minute boundaries without displaying 60 seconds", () => {
@@ -82,4 +87,63 @@ it("continues to find older observations without model evidence", () => {
   expect(matchesObservation(event, "magpie")).toBe(true);
   expect(matchesObservation(event, "unreviewed")).toBe(true);
   expect(matchesObservation(event, "")).toBe(true);
+});
+
+describe("recently seen", () => {
+  it("lists what left the frame within the window, newest first, one per track", () => {
+    const visual = (id: string, track: string, ms: number): Detection =>
+      ({
+        event_id: id,
+        source_id: "s",
+        source_filename: "f",
+        job_id: "j",
+        models: {},
+        environment: {
+          status: "not_connected",
+          sensor_id: null,
+          observed_at: null,
+          age_seconds: null,
+          temperature_c: null,
+          humidity_percent: null,
+          pressure_hpa: null,
+        },
+        review: {
+          status: "unreviewed",
+          corrected_taxon_id: null,
+          corrected_scientific_name: null,
+          notes: null,
+          updated_at: null,
+        },
+        modality: "visual",
+        timestamp_ms: ms,
+        duration_ms: 500,
+        track_id: track,
+        bbox_norm: [0, 0, 1, 1],
+        detector: { label: "animal", score: 0.9, model: "MD" },
+        classification: {
+          broad_group: "Aves",
+          scientific_name: null,
+          common_name: null,
+          score: null,
+          margin: null,
+          status: "unknown",
+          display_label: "Unknown bird",
+          unknown_reason: null,
+          top_k: [],
+        },
+      }) as Detection;
+    const events = [
+      visual("a1", "t-track-1", 1000),
+      visual("a2", "t-track-1", 1500),
+      visual("b1", "t-track-2", 12_000),
+      visual("c1", "t-track-3", 29_600),
+      visual("old", "t-track-4", 5000),
+    ];
+    const recent = recentEvents(events, 30_000, 20_000);
+    expect(recent.map((e) => e.event_id)).toEqual(["b1"]);
+    expect(recentEvents(events, 2_500, 20_000).map((e) => e.event_id)).toEqual([
+      "a2",
+    ]);
+    expect(recentEvents(events, 1_200, 20_000)).toEqual([]); // still in view: not "recent"
+  });
 });

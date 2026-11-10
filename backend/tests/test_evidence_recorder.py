@@ -218,7 +218,7 @@ def test_hevc_and_fractional_frame_rates_keep_real_timing(
 def test_unsupported_camera_codec_is_explicit(tmp_path: Path) -> None:
     recorder = EvidenceRecorder(tmp_path / "evidence", Results())
     generation = recorder.start_generation(SimpleNamespace(
-        codec_context=SimpleNamespace(name="mjpeg", extradata=None), average_rate=30,
+        codec_context=SimpleNamespace(name="vp8", extradata=None), average_rate=30,
     ))
     try:
         assert recorder.pin(Frame(
@@ -336,3 +336,34 @@ def test_continuation_clip_starts_at_requested_time_and_is_complete(tmp_path: Pa
     assert result["status"] == "ready"
     assert result["duration_ms"] == 4000
     assert (result["actual_start_ms"], result["actual_end_ms"]) == (14000, 18000)
+
+
+def test_people_boxes_are_masked_in_the_saved_clip(tmp_path: Path) -> None:
+    source = recording(tmp_path / "source.mp4", seconds=12)
+    results = Results()
+    recorder = EvidenceRecorder(tmp_path / "evidence", results, reserve_bytes=0)
+    try:
+        pin_id = ""
+        with av.open(str(source)) as container:
+            generation = recorder.start_generation(container.streams.video[0])
+            for packet in container.demux(video=0):
+                recorder.append_packet(packet)
+                for decoded in packet.decode():
+                    timestamp = float(decoded.pts * decoded.time_base)
+                    if not pin_id and timestamp >= 4:
+                        pin_id = recorder.pin(Frame(
+                            14000, np.zeros((1, 1, 3), dtype=np.uint8),
+                            recording_generation=generation, recording_timestamp_s=timestamp,
+                        )) or ""
+                        recorder.request(pin_id, "masked-clip", redact=[(0.5, 0.0, 1.0, 1.0)])
+                        recorder.release(pin_id)
+        assert results.finished.wait(10)
+        result = results.values["masked-clip"]
+        assert result["status"] == "ready"
+        with av.open(str(tmp_path / "evidence" / result["relative_path"])) as clip:
+            pixels = next(iter(clip.decode(video=0))).to_ndarray(format="rgb24")
+        left, right = pixels[:, :28].astype(int), pixels[:, 36:].astype(int)
+        assert abs(right - 96).max() <= 12  # the right half is uniform gray
+        assert left.std() > 0 or abs(left.mean() - 96) > 20  # the left half is untouched
+    finally:
+        recorder.close()

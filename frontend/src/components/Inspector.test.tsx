@@ -105,7 +105,7 @@ describe("species review selection", () => {
       /<button class="primary" disabled="">Save review<\/button>/,
     );
     expect(html).toMatch(/role="option" aria-selected="false"/);
-    expect(html.match(/<input[^>]*value="correct"[^>]*>/)?.[0]).toContain(
+    expect(html.match(/<button[^>]*decision-correct[^>]*>/)?.[0]).toContain(
       'disabled=""',
     );
   });
@@ -117,6 +117,6 @@ describe("species review selection", () => {
     expect(html).toContain("Common Tailorbird");
     expect(html).toContain("Unknown bird");
     expect(html).not.toContain('<button class="primary" disabled="">');
-    expect(html).toContain("Model identification");
+    expect(html).toContain("model said");
   });
 });

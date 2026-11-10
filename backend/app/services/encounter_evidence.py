@@ -13,12 +13,33 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Literal
 
+from app.inference.privacy import merge_boxes
 from app.media.base import Frame
 from app.media.evidence_recorder import EvidenceRecorder
 from app.media.rtsp_source import AudioChunk
-from app.schemas import AudioEvent, VisualEvent
+from app.schemas import AudioEvent, BBox, VisualEvent
 from app.schemas_evidence import EvidenceRecord
 from app.storage.evidence import EvidenceStore
+
+BOUT_CLIPS = 3  # sound clips kept per calling bout at most
+BOUT_STEP = 0.05  # a later call needs this much more confidence than every kept clip
+
+
+def _silenced(
+    payload: bytes, chunk: AudioChunk, start_ms: int, end_ms: int,
+    mute: list[tuple[int, int]],
+) -> bytes | None:
+    """Zero the 16-bit samples that overlap any muted interval; None when nothing overlaps."""
+    overlapping = [(max(start_ms, a), min(end_ms, b)) for a, b in mute if b > start_ms and a < end_ms]
+    if not overlapping:
+        return None
+    samples = bytearray(payload)
+    for a, b in overlapping:
+        first = max(0, round((a - start_ms) * chunk.sample_rate / 1000)) * 2
+        last = min(len(samples), round((b - start_ms) * chunk.sample_rate / 1000) * 2)
+        if last > first:
+            samples[first:last] = b"\0" * (last - first)
+    return bytes(samples)
 
 
 class EncounterEvidence:
@@ -32,8 +53,19 @@ class EncounterEvidence:
         self, store: EvidenceStore, session_id: str, source_id: str,
         started_at: str, *, reserve_bytes: int = 256 * 1024**2,
         clock: Callable[[int], datetime] | None = None,
+        pre_seconds: float = 2.0, post_seconds: float = 3.0,
     ):
         self.store = store
+        # Clips cover pre_seconds before the first detected frame or call and post_seconds after it.
+        self.pre_ms = round(pre_seconds * 1000)
+        self.post_ms = round(post_seconds * 1000)
+        # Recent analysis windows (with their voice intervals), the window whose clips
+        # wait for the next one, and the sound clips already saved.
+        self._audio_chunks: deque[tuple[AudioChunk, list[tuple[int, int]]]] = deque(maxlen=3)
+        self._audio_pending: tuple[AudioChunk, list[AudioEvent]] | None = None
+        self._audio_windows: deque[tuple[int, int, str]] = deque(maxlen=32)
+        # Per calling bout: (confidence, clip id) of each clip kept.
+        self._bout_clips: dict[str, list[tuple[float, str]]] = {}
         self.session_id, self.source_id = session_id, source_id
         self.started_at = datetime.fromisoformat(started_at)
         # Session offset -> wall clock; the live service corrects for suspends and clock steps.
@@ -42,13 +74,23 @@ class EncounterEvidence:
         def completed(identity: str, result: dict[str, Any]) -> None:
             store.complete(identity, result)
 
-        self.recorder = EvidenceRecorder(store.root, completed, reserve_bytes=reserve_bytes)
+        self.recorder = EvidenceRecorder(
+            store.root, completed, reserve_bytes=reserve_bytes,
+            pre_seconds=self.pre_ms / 1000, post_seconds=self.post_ms / 1000,
+            # The ring must still hold the pre-roll once detection has run.
+            buffer_seconds=max(15.0, pre_seconds + 10),
+        )
         self._frame: Frame | None = None
         self._pin: str | None = None
-        self._windows: deque[tuple[str | None, int, int, str]] = deque(maxlen=16)
+        # Per visit: (stream generation, the frame time its last clip is centred on, clip id).
+        self._visit_clips: dict[str, tuple[str | None, int, str]] = {}
+        # Session time of recently analyzed frames and the people seen in them.
+        self._people: deque[tuple[int, list[BBox]]] = deque(maxlen=64)
         self._mutex = threading.Lock()
         self._error = ""
         self._audio_saved = 0
+        self._redacted_clips = 0
+        self._muted_audio = 0
 
     @contextmanager
     def frame_context(self, frame: Frame) -> Iterator[None]:
@@ -72,6 +114,20 @@ class EncounterEvidence:
                         self._error = "The video buffer could not be released."
             self._pin, self._frame = None, None
 
+    def people(self, timestamp_ms: int, boxes: list[BBox]) -> None:
+        """Remember where people were, so clips around that time can mask them."""
+        with self._mutex:
+            self._people.append((timestamp_ms, list(boxes)))
+
+    def _people_between(self, start_ms: int, end_ms: int) -> list[BBox]:
+        with self._mutex:
+            groups = [
+                boxes for moment, boxes in self._people
+                if boxes and start_ms - 1500 <= moment <= end_ms + 1500
+            ]
+        # Clips are sampled sparsely; pad generously so a walking person stays covered.
+        return merge_boxes(groups, fraction=0.25)
+
     def _create(self, kind: Literal["video", "audio"], start: int, end: int) -> EvidenceRecord:
         return self.store.create(
             source_id=self.source_id, session_id=self.session_id,
@@ -87,32 +143,40 @@ class EncounterEvidence:
         try:
             frame = self._frame
             generation = frame.recording_generation if frame else None
-            for previous_generation, start, end, previous_id in reversed(self._windows):
-                if generation == previous_generation and start <= event.timestamp_ms < end:
-                    previous = self.store.get(previous_id)
-                    if previous.status == "failed":
-                        continue
-                    if previous.status in {"ready", "partial"} and not (
-                        previous.actual_start_ms is not None
-                        and previous.actual_end_ms is not None
-                        and previous.actual_start_ms <= event.timestamp_ms < previous.actual_end_ms
-                    ):
-                        continue
-                    self.store.link(previous_id, event.event_id)
-                    return
-            start, end = max(0, event.timestamp_ms - 2000), event.timestamp_ms + 3000
-            # A lingering animal must not produce overlapping clips: continue from
-            # the end of the previous clip in this stream generation instead.
-            start = max([start, *(
-                previous_end for previous_generation, _, previous_end, _ in self._windows
-                if previous_generation == generation and previous_end <= event.timestamp_ms
-            )])
+            # Every clip is a full 10 s (pre + post) around the frame that starts it.
+            # Each visit has its own clips, even when two animals overlap (Vinay, 9-10
+            # Nov): one at arrival, then one at the first frame 10 s or more later, so a
+            # bird that stays 20 s gets clips at 0, 10 and 20 s.
+            key = event.visit_id or f"{event.job_id}:{event.track_id}"
+            length = self.pre_ms + self.post_ms
+            previous = self._visit_clips.get(key)
+            if previous is not None:
+                previous_generation, centre, previous_id = previous
+                if generation == previous_generation and event.timestamp_ms < centre + length:
+                    saved = self.store.get(previous_id)
+                    # A failed clip, or one cut short by the stream, that misses this
+                    # frame is not reused: this frame starts a fresh clip.
+                    covered = saved.status != "failed" and not (
+                        saved.status in {"ready", "partial"}
+                        and saved.actual_start_ms is not None and saved.actual_end_ms is not None
+                        and not saved.actual_start_ms <= event.timestamp_ms < saved.actual_end_ms
+                    )
+                    if covered:
+                        self.store.link(previous_id, event.event_id)
+                        return
+            start, end = max(0, event.timestamp_ms - self.pre_ms), event.timestamp_ms + self.post_ms
             record = self._create("video", start, end)
             evidence_id = record.evidence_id
             self.store.link(record.evidence_id, event.event_id)
-            self._windows.append((generation, start, end, record.evidence_id))
+            self._visit_clips[key] = (generation, event.timestamp_ms, record.evidence_id)
+            while len(self._visit_clips) > 64:  # visits long gone
+                self._visit_clips.pop(next(iter(self._visit_clips)))
             if self._pin:
-                self.recorder.request(self._pin, record.evidence_id, start_ms=start)
+                redact = self._people_between(start, end)
+                if redact:
+                    with self._mutex:
+                        self._redacted_clips += 1
+                self.recorder.request(self._pin, record.evidence_id, redact=redact)
             else:
                 self.store.complete(record.evidence_id, {
                     "status": "failed",
@@ -130,16 +194,73 @@ class EncounterEvidence:
                 except Exception:
                     pass
 
-    def audio(self, chunk: AudioChunk, events: list[AudioEvent]) -> None:
-        """Events already use session offsets; PCM still belongs to this window."""
+    def audio(
+        self, chunk: AudioChunk, events: list[AudioEvent],
+        mute: list[tuple[int, int]] | None = None,
+    ) -> None:
+        """Events already use session offsets; PCM belongs to this analysis window.
+
+        A sound clip covers pre_ms before a call and post_ms after it, which can
+        reach into the previous and the next window. So each window's clips are cut
+        when the next window arrives (or at close), from the contiguous windows kept.
+        mute lists session-time intervals with human voices; those samples are
+        silenced in the saved clip so people are never recorded.
+        """
+        self._audio_chunks.append((chunk, list(mute or [])))
+        pending, self._audio_pending = self._audio_pending, (chunk, list(events))
+        if pending and pending[1]:
+            self._audio_clips(*pending)
+
+    def _audio_span(self, chunk: AudioChunk) -> tuple[AudioChunk, list[tuple[int, int]]]:
+        """The kept windows that join up with chunk (no gap), as one PCM span."""
+        kept = list(self._audio_chunks)
+        index = next((i for i, (c, _) in enumerate(kept) if c is chunk), None)
+        if index is None:
+            return chunk, []
+        first = last = index
+        while first > 0 and abs(kept[first - 1][0].start_ms + kept[first - 1][0].duration_ms - kept[first][0].start_ms) <= 50:
+            first -= 1
+        while last + 1 < len(kept) and abs(kept[last][0].start_ms + kept[last][0].duration_ms - kept[last + 1][0].start_ms) <= 50:
+            last += 1
+        parts = kept[first:last + 1]
+        span = AudioChunk(
+            parts[0][0].start_ms, b"".join(c.pcm for c, _ in parts), parts[0][0].sample_rate, chunk.timing_note,
+        )
+        return span, [interval for _, mute in parts for interval in mute]
+
+    def _audio_clips(self, chunk: AudioChunk, events: list[AudioEvent]) -> None:
+        span, mute = self._audio_span(chunk)
         windows: dict[tuple[int, int], str] = {}
         for event in events:
             evidence_id: str | None = None
             temporary: Path | None = None
             try:
+                # Per calling bout (one bird calling on and off): the first call's 10 s
+                # clip always stays; a later call gets its own clip only if it is at
+                # least 0.05 more confident than every clip kept for the bout, at most 3
+                # per bout. Other calls are linked to the bout's best clip.
+                kept = self._bout_clips.get(event.bout_id or "") if event.bout_id else None
+                if kept is not None and (
+                    len(kept) >= BOUT_CLIPS or event.confidence < max(c for c, _ in kept) + BOUT_STEP
+                ):
+                    self.store.link(max(kept)[1], event.event_id)
+                    continue
+                # A call inside a clip already saved (without a bout) shares it.
+                shared = None if event.bout_id else next((
+                    identity for start, end, identity in self._audio_windows
+                    if start <= event.start_ms < end
+                ), None)
+                if shared:
+                    self.store.link(shared, event.event_id)
+                    continue
+                chunk = span
                 relative = max(0, event.start_ms - chunk.start_ms)
-                start_ms = max(0, min(relative - 2000, chunk.duration_ms - 5000))
-                end_ms = min(chunk.duration_ms, start_ms + 5000)
+                # A full 10 s (pre + post) around the call; at the edge of the sound
+                # that is kept, the window slides inward instead of being cut short.
+                length = self.pre_ms + self.post_ms
+                start_ms = relative - self.pre_ms
+                start_ms = max(0, min(start_ms, chunk.duration_ms - length))
+                end_ms = min(chunk.duration_ms, start_ms + length)
                 sample_start = round(start_ms * chunk.sample_rate / 1000)
                 sample_end = min(len(chunk.pcm) // 2, round(end_ms * chunk.sample_rate / 1000))
                 key = (sample_start, sample_end)
@@ -151,10 +272,20 @@ class EncounterEvidence:
                 record = self._create("audio", actual_start, actual_end)
                 evidence_id = record.evidence_id
                 windows[key] = evidence_id
+                self._audio_windows.append((actual_start, actual_end, evidence_id))
+                if event.bout_id:
+                    self._bout_clips.setdefault(event.bout_id, []).append((event.confidence, evidence_id))
+                    while len(self._bout_clips) > 64:
+                        self._bout_clips.pop(next(iter(self._bout_clips)))
                 self.store.link(evidence_id, event.event_id)
                 if sample_end <= sample_start:
                     raise ValueError("Empty audio interval")
                 payload = chunk.pcm[sample_start * 2:sample_end * 2]
+                muted = _silenced(payload, chunk, actual_start, actual_end, mute or [])
+                if muted is not None:
+                    payload = muted
+                    with self._mutex:
+                        self._muted_audio += 1
                 if shutil.disk_usage(self.store.root).free < self.reserve_bytes + len(payload) + 4096:
                     raise OSError("Insufficient storage")
                 fd, name = tempfile.mkstemp(prefix=".audio-", suffix=".wav", dir=self.store.root)
@@ -179,14 +310,15 @@ class EncounterEvidence:
                     os.close(directory_fd)
                 duration = actual_end - actual_start
                 self.store.complete(evidence_id, {
-                    "status": "ready" if duration == 5000 else "partial",
+                    "status": "ready" if duration >= self.pre_ms + self.post_ms - 20 else "partial",
                     "relative_path": target.name,
                     "size_bytes": target.stat().st_size,
                     "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
                     "duration_ms": duration,
                     "actual_start_ms": actual_start, "actual_end_ms": actual_end,
                     "audio_present": True, "mime_type": "audio/wav",
-                    "message": "Mono acoustic evidence; decoded sample clock anchored to server receive time.",
+                    "message": "Mono acoustic evidence; decoded sample clock anchored to server receive time."
+                    + (" Seconds with human voices were silenced." if muted is not None else ""),
                 })
                 with self._mutex:
                     self._audio_saved += 1
@@ -210,9 +342,23 @@ class EncounterEvidence:
     def metrics(self) -> dict[str, str | int | float]:
         result = self.recorder.metrics()
         with self._mutex:
-            result.update({"audio_clips_saved": self._audio_saved, "evidence_error": self._error})
-        result["evidence_policy"] = "5-second clips; rolling buffer; no continuous archive"
+            result.update({
+                "audio_clips_saved": self._audio_saved, "evidence_error": self._error,
+                "clips_with_people_masked": self._redacted_clips,
+                "audio_clips_with_voices_muted": self._muted_audio,
+            })
+        result["evidence_policy"] = (
+            f"clips from {self.pre_ms / 1000:g} s before to {self.post_ms / 1000:g} s after the first "
+            "detection or call; rolling buffer; no continuous archive"
+        )
         return result
 
+    def flush_audio(self) -> None:
+        """Cut the waiting window's sound clips now, with whatever audio followed them."""
+        pending, self._audio_pending = self._audio_pending, None
+        if pending and pending[1]:
+            self._audio_clips(*pending)
+
     def close(self) -> None:
+        self.flush_audio()
         self.recorder.close()

@@ -98,7 +98,7 @@ All of these are also inside FALCON: open **Help** in the menu (with search acro
 
 | Guide | For |
 | --- | --- |
-| [User guide](docs/USER_GUIDE.md) | Using the web interface: Live, Review, Sensors, Export |
+| [User guide](docs/USER_GUIDE.md) | Using the web interface: Live, Review, Summary, Sensors, Export |
 | [Inference node install](docs/INSTALL.md) | Installing, auto-start, updates, WSL |
 | [Sensor node](docs/SENSOR_NODE.md) | Setting up and connecting the Raspberry Pi node |
 | [Node build handbook (PDF)](docs/handbooks/FALCON-Node-Build-Handbook.pdf) | Building the node hardware |

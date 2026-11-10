@@ -8,10 +8,13 @@ import {
   type EncounterFilters,
 } from "../api/encounters";
 import { formatDateTime, fromLocalInput, toLocalInput } from "../api/format";
+import { hashQuery } from "../api/summary";
 import Icon from "../components/Icon";
 import { HelpLink } from "./HelpPage";
 import { usePoll } from "../hooks/usePoll";
+import { usePersistentState } from "../hooks/usePersistentState";
 import type { ReviewStatus } from "../types";
+import CertaintyLegend from "../ui/CertaintyLegend";
 import EncounterCard, { type DecisionHandler } from "../ui/EncounterCard";
 import SpeciesPicker from "../ui/SpeciesPicker";
 import type { Taxon } from "./Taxa";
@@ -72,13 +75,27 @@ export default function ReviewPage({
   onOpen: (encounter: Encounter) => void;
   revision: number;
 }) {
-  const [period, setPeriod] = useState<Period>("7d");
+  const [period, setPeriod] = useState<Period>(() =>
+    typeof window !== "undefined" && hashQuery(window.location.hash, "source")
+      ? "all"
+      : "7d",
+  );
   const [from, setFrom] = useState(() =>
     toLocalInput(new Date(Date.now() - 86400_000)),
   );
   const [to, setTo] = useState(() => toLocalInput(new Date()));
   const [scope, setScope] = useState<"live" | "all">("live");
-  const [source, setSource] = useState("");
+  // "#/review?source=…" opens one session (from the Summary page).
+  const [source, setSource] = useState(() =>
+    typeof window === "undefined"
+      ? ""
+      : hashQuery(window.location.hash, "source"),
+  );
+  const [showUnresolved, setShowUnresolved] = useState(false);
+  const [showGlimpses, setShowGlimpses] = usePersistentState<boolean>(
+    "review.glimpses",
+    false,
+  );
   const [modality, setModality] = useState("");
   const [status, setStatus] = useState("unreviewed");
   const [query, setQuery] = useState("");
@@ -98,6 +115,8 @@ export default function ReviewPage({
     review_status: status || undefined,
     q: query,
     min_score: minScore === "" ? null : Number(minScore),
+    resolved_only: !showUnresolved,
+    hide_glimpses: !showGlimpses,
     ...bounds,
     limit: PAGE,
     offset,
@@ -201,6 +220,12 @@ export default function ReviewPage({
             {status
               ? STATUSES.find(([value]) => value === status)?.[1].toLowerCase()
               : "encounters"}
+            {page.data?.hidden_unresolved
+              ? ` · ${page.data.hidden_unresolved.toLocaleString()} unresolved hidden`
+              : ""}
+            {page.data?.hidden_glimpses
+              ? ` · ${page.data.hidden_glimpses.toLocaleString()} glimpses hidden`
+              : ""}
           </span>
         </div>
       </header>
@@ -321,6 +346,28 @@ export default function ReviewPage({
                 ))}
               </select>
             </div>
+            <label className="filter switch-row">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={showUnresolved}
+                onChange={(change) =>
+                  changeFilter(setShowUnresolved)(change.target.checked)
+                }
+              />
+              <span>Show unresolved (no species, no group)</span>
+            </label>
+            <label className="filter switch-row">
+              <input
+                type="checkbox"
+                role="switch"
+                checked={showGlimpses}
+                onChange={(change) =>
+                  changeFilter(setShowGlimpses)(change.target.checked)
+                }
+              />
+              <span>Show glimpses (1 frame)</span>
+            </label>
             <div className="filter">
               <label htmlFor="review-score">Minimum score</label>
               <input
@@ -430,6 +477,7 @@ export default function ReviewPage({
           />
         )}
       </div>
+      <CertaintyLegend />
       <p className="feed-help">
         Keyboard: <kbd>J</kbd>/<kbd>K</kbd> move · <kbd>C</kbd> confirm ·{" "}
         <kbd>E</kbd> correct · <kbd>U</kbd> unsure · <kbd>X</kbd> not an animal

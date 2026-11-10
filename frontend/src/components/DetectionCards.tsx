@@ -5,11 +5,54 @@ import {
 } from "../api/timeline";
 import type { VisualEvent, AudioEvent, Detection } from "../types";
 import Icon from "./Icon";
+import {
+  certaintyDetail,
+  certaintyOf,
+  leadingName,
+  metricsLine,
+  qualityReason,
+} from "../api/certainty";
 import { groupName } from "../api/taxa";
-import { consensusLabel, speciesModelName } from "../api/models";
 import ModelEvidence from "./ModelEvidence";
 import { useTaxonNames } from "./TaxonNames";
 import { scientificSubtitle } from "../api/names";
+
+/** Top candidates as compact bars; the leader is bold. */
+export function SuggestionBars({
+  event,
+  limit = 3,
+}: {
+  event: VisualEvent;
+  limit?: number;
+}) {
+  const rows = (event.classification.top_k ?? [])
+    .filter((candidate) => typeof candidate.score === "number")
+    .slice(0, limit);
+  if (!rows.length) return null;
+  const top = rows[0].score || 1;
+  return (
+    <ol className="suggestions" aria-label="Model suggestions">
+      {rows.map((candidate, index) => (
+        <li key={candidate.taxon_id} className={index === 0 ? "leader" : ""}>
+          <span>
+            {candidate.common_name || candidate.scientific_name}
+            {scientificSubtitle(
+              candidate.common_name || candidate.scientific_name,
+              candidate.scientific_name,
+            ) && <small>{candidate.scientific_name}</small>}
+          </span>
+          <i
+            aria-hidden="true"
+            style={{
+              width: `${Math.max(4, Math.min(100, (candidate.score / top) * 100))}%`,
+            }}
+          />
+          <code>{candidate.score.toFixed(3)}</code>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 export function VisualCards({
   events,
@@ -27,96 +70,67 @@ export function VisualCards({
           <p>No visual observations at this timestamp.</p>
         </div>
       ) : (
-        events.map((e) => (
-          <article className="detection-card" key={e.event_id}>
-            <div className="card-top">
-              <span className="tag">
-                {groupName(e.classification.broad_group)}
-              </span>
-              <span className="muted">
-                {e.track_id.split("-track-")[1]
-                  ? "Track " + e.track_id.split("-track-")[1]
-                  : ""}
-              </span>
-            </div>
-            <h4>{displayLabel(e, taxonNames)}</h4>
-            {displayScientificName(e, taxonNames) && (
-              <em>{displayScientificName(e, taxonNames)}</em>
-            )}
-            {e.review.status === "unreviewed" &&
-              e.classification.status === "unknown" &&
-              e.classification.top_k[0] && (
-                <p className="closest-match">
-                  <span>
-                    {(e.classification.model_evidence?.length ?? 0) > 1
-                      ? `${speciesModelName(e.classification.model_evidence![0].model)} suggests · uncertain`
-                      : "Closest match · uncertain"}
+        events.map((e) => {
+          const certainty = certaintyOf(e);
+          const detail = certaintyDetail(e);
+          const quality = qualityReason(e);
+          const name =
+            e.review.status === "unreviewed"
+              ? leadingName(e, taxonNames)
+              : displayLabel(e, taxonNames);
+          const scientific = displayScientificName(e, taxonNames);
+          return (
+            <article
+              className="detection-card compact"
+              key={e.event_id}
+              data-certainty={certainty?.level}
+            >
+              <div className="card-top">
+                <span className="tag">
+                  {groupName(e.classification.broad_group)}
+                </span>
+                <span className="muted">
+                  {e.track_id.split("-track-")[1]
+                    ? `Track ${e.track_id.split("-track-")[1]} · `
+                    : ""}
+                  {formatTime(e.timestamp_ms)}
+                </span>
+              </div>
+              <div className="card-name">
+                <h4
+                  className={
+                    certainty ? `certainty-${certainty.level}` : undefined
+                  }
+                >
+                  {name}
+                </h4>
+                {certainty && (
+                  <span
+                    className={`certainty certainty-${certainty.level}`}
+                    title={certainty.title}
+                  >
+                    <i aria-hidden="true" />
+                    {certainty.label}
                   </span>
-                  <strong>
-                    {e.classification.top_k[0].common_name ||
-                      e.classification.top_k[0].scientific_name}
-                  </strong>
-                </p>
+                )}
+              </div>
+              {(scientific || detail) && <em>{scientific ?? detail}</em>}
+              {scientific && detail && <em>{detail}</em>}
+              <p className="metrics">{metricsLine(e) || "No model scores"}</p>
+              {quality && <p className="reason">{quality}</p>}
+              {e.review.status === "unreviewed" && <SuggestionBars event={e} />}
+              {(e.classification.model_evidence?.length ?? 0) > 1 && (
+                <details>
+                  <summary>Compare models</summary>
+                  <ModelEvidence classification={e.classification} />
+                </details>
               )}
-            <p className="score-line">
-              Detector confidence{" "}
-              <strong>
-                {e.detector.score?.toFixed(3) ?? "Motion proposal"}
-              </strong>
-            </p>
-            <p className="score-line">
-              {e.classification.model_evidence?.[0]
-                ? `${speciesModelName(e.classification.model_evidence[0].model)} similarity`
-                : "Species similarity"}{" "}
-              <strong>{e.classification.score?.toFixed(3) ?? "—"}</strong>
-            </p>
-            {consensusLabel(e.classification) && (
-              <p className={`model-consensus ${e.classification.consensus}`}>
-                {consensusLabel(e.classification)}
-              </p>
-            )}
-            {e.classification.unknown_reason && (
-              <p className="reason">
-                {e.classification.unknown_reason === "Ambiguous top candidates"
-                  ? "Several species look similar. More detail is needed."
-                  : e.classification.unknown_reason}
-              </p>
-            )}
-            <details>
-              <summary>Compare alternatives</summary>
-              <p className="muted">
-                {e.detector.model} ·{" "}
-                {e.detector.score?.toFixed(3) ??
-                  "motion proposal (no detector score)"}
-              </p>
-              {e.classification.model_evidence?.length ? (
-                <ModelEvidence classification={e.classification} />
-              ) : (
-                <>
-                  <p className="muted">
-                    Top-two margin {e.classification.margin?.toFixed(3) ?? "—"}.
-                    Similarity is not a probability.
-                  </p>
-                  {e.classification.top_k.map((t) => (
-                    <div className="alternative" key={t.taxon_id}>
-                      <span>
-                        {t.common_name || t.scientific_name}
-                        {scientificSubtitle(
-                          t.common_name || t.scientific_name,
-                          t.scientific_name,
-                        ) && <small>{t.scientific_name}</small>}
-                      </span>
-                      <code>{t.score.toFixed(3)}</code>
-                    </div>
-                  ))}
-                </>
-              )}
-            </details>
-            <button className="subtle" onClick={() => onInspect(e)}>
-              Review observation <Icon name="arrow" size={13} />
-            </button>
-          </article>
-        ))
+              <button className="subtle" onClick={() => onInspect(e)}>
+                Review <Icon name="arrow" size={13} />
+              </button>
+            </article>
+          );
+        })
       )}
     </>
   );
@@ -137,24 +151,46 @@ export function AudioCards({
           <p>No acoustic detections at this timestamp.</p>
         </div>
       ) : (
-        events.map((e) => (
-          <article className="detection-card audio" key={e.event_id}>
-            <span className="tag">Acoustic detection</span>
-            <h4>{displayLabel(e, taxonNames)}</h4>
-            {displayScientificName(e, taxonNames) && (
-              <em>{displayScientificName(e, taxonNames)}</em>
-            )}
-            <p className="score-line">
-              BirdNET confidence <strong>{e.confidence.toFixed(3)}</strong>
-            </p>
-            <p className="observation-time">
-              {formatTime(e.start_ms)} – {formatTime(e.end_ms)}
-            </p>
-            <button className="subtle" onClick={() => onInspect(e)}>
-              Review observation <Icon name="arrow" size={13} />
-            </button>
-          </article>
-        ))
+        events.map((e) => {
+          const certainty = certaintyOf(e);
+          return (
+            <article className="detection-card audio compact" key={e.event_id}>
+              <div className="card-top">
+                <span className="tag">Acoustic detection</span>
+                <span className="muted">
+                  {formatTime(e.start_ms)} – {formatTime(e.end_ms)}
+                </span>
+              </div>
+              <div className="card-name">
+                <h4
+                  className={
+                    certainty ? `certainty-${certainty.level}` : undefined
+                  }
+                >
+                  {displayLabel(e, taxonNames)}
+                </h4>
+                {certainty && (
+                  <span
+                    className={`certainty certainty-${certainty.level}`}
+                    title={certainty.title}
+                  >
+                    <i aria-hidden="true" />
+                    {certainty.label}
+                  </span>
+                )}
+              </div>
+              {displayScientificName(e, taxonNames) && (
+                <em>{displayScientificName(e, taxonNames)}</em>
+              )}
+              <p className="metrics">
+                BirdNET confidence {e.confidence.toFixed(2)}
+              </p>
+              <button className="subtle" onClick={() => onInspect(e)}>
+                Review <Icon name="arrow" size={13} />
+              </button>
+            </article>
+          );
+        })
       )}
     </>
   );

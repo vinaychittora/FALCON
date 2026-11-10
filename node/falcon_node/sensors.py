@@ -55,6 +55,71 @@ class RainPlate:
         return True, (not pulled_up) if self.wet_when_low else pulled_up
 
 
+class RainWatch(threading.Thread):
+    """Watches the rain plate twice a second, so a few drops between readings count.
+
+    - wet: any wet sample in the last 60 s (sent with each reading as surface_wet)
+    - raining: held for 10 minutes after the last wet sample
+    - pulses: dry-to-wet changes in the last hour; last_wet: when it was last wet
+    A pin that flickers right at the board's threshold (the two pull reads disagree)
+    counts as wet when the plate was connected a moment before, not as "not connected".
+    """
+
+    POLL, WET_WINDOW, RAINING_HOLD = 0.5, 60.0, 600.0
+
+    def __init__(self, plate: RainPlate, enabled: Callable[[], bool],
+                 clock: Callable[[], float] = time.monotonic, wall: Callable[[], datetime] = lambda: datetime.now(UTC)):
+        super().__init__(daemon=True, name="falcon-node-rain")
+        self.plate, self.enabled, self.clock, self.wall = plate, enabled, clock, wall
+        self.stop_event = threading.Event()
+        self.lock = threading.Lock()
+        self.connected: bool | None = None
+        self.connected_at = -1e9
+        self.last_wet_mono: float | None = None
+        self.last_wet_at: str | None = None
+        self.was_wet = False
+        self.pulses: list[float] = []
+        self.error: str | None = None
+
+    def poll(self) -> None:
+        now = self.clock()
+        try:
+            connected, wet = self.plate.read()
+            self.error = None
+        except Exception as exc:  # noqa: BLE001 - a read failure is reported, not fatal
+            self.error = f"read failed ({type(exc).__name__})"
+            return
+        if not connected and now - self.connected_at <= 5.0:
+            connected, wet = True, True  # flicker at the threshold: water on the plate
+        with self.lock:
+            self.connected = connected
+            if connected:
+                self.connected_at = now
+            if connected and wet:
+                self.last_wet_mono, self.last_wet_at = now, self.wall().isoformat(timespec="seconds")
+                if not self.was_wet:
+                    self.pulses.append(now)
+            self.was_wet = bool(connected and wet)
+            self.pulses = [t for t in self.pulses if now - t <= 3600]
+
+    def summary(self) -> dict[str, Any]:
+        now = self.clock()
+        with self.lock:
+            since = None if self.last_wet_mono is None else now - self.last_wet_mono
+            return {
+                "connected": self.connected, "error": self.error,
+                "wet": since is not None and since <= self.WET_WINDOW,
+                "raining": since is not None and since <= self.RAINING_HOLD,
+                "last_wet": self.last_wet_at, "wet_pulses_last_hour": len(self.pulses),
+            }
+
+    def run(self) -> None:
+        while not self.stop_event.is_set():
+            if self.enabled():
+                self.poll()
+            self.stop_event.wait(self.POLL)
+
+
 def build_reading(
     sensor_id: str, observed_at: datetime,
     climate: tuple[float, float | None, float] | None, wet: bool | None, synchronized: bool | None,
@@ -188,6 +253,15 @@ class Sampler(threading.Thread):
             "rain": {"present": rain is not None, "state": "starting" if rain else "not configured"},
         }
         self.last_reading: dict[str, Any] | None = None
+        # The rain plate is watched twice a second in its own thread (started with the sampler).
+        self.rain_watch = RainWatch(rain, lambda: self.enabled("rain")) if rain is not None else None
+        if self.rain_watch is not None:
+            self.rain_watch.stop_event = self.stop_event  # stops with the sampler (rescan, shutdown)
+
+    def start(self) -> None:
+        if self.rain_watch is not None:
+            self.rain_watch.start()
+        super().start()
 
     def _read_climate(self) -> tuple[float, float | None, float] | None:
         if self.climate_factory is None or not self.enabled("climate"):
@@ -211,6 +285,23 @@ class Sampler(threading.Thread):
             if self.rain is not None:
                 self.status["rain"]["state"] = "off"
             return None
+        if self.rain_watch is not None:
+            # Twice-a-second watch: wet if any sample in the last 60 s was wet.
+            summary = self.rain_watch.summary()
+            if summary["error"]:
+                self.status["rain"].update(state="error", error=summary["error"])
+                return None
+            connected = summary["connected"]
+            if connected is None:
+                return None
+            wet = bool(summary["wet"])
+            self.status["rain"].update(
+                state=("raining" if summary["raining"] and wet else "wet" if wet else
+                       "recently wet" if summary["raining"] else "dry") if connected else "not connected",
+                connected=connected, error=None, last_wet=summary["last_wet"],
+                wet_pulses_last_hour=summary["wet_pulses_last_hour"], raining=summary["raining"],
+            )
+            return wet if connected else None
         try:
             connected, wet = self.rain.read()
         except Exception as exc:

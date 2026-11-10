@@ -2,6 +2,8 @@ export type DisplayPreferences = {
   theme: "dark" | "light" | "system";
   textSize: "standard" | "large" | "extra-large";
   contrast: "standard" | "high";
+  /** Where the page links sit: a side column (default) or a bar along the top. */
+  navigation: "side" | "top";
 };
 
 export const DISPLAY_STORAGE_KEY = "falcon.display-preferences.v1";
@@ -9,6 +11,7 @@ export const DEFAULT_DISPLAY: DisplayPreferences = {
   theme: "dark",
   textSize: "standard",
   contrast: "standard",
+  navigation: "side",
 };
 
 export function parseDisplayPreferences(
@@ -28,6 +31,7 @@ export function parseDisplayPreferences(
           ? candidate.textSize
           : "standard",
       contrast: candidate.contrast === "high" ? "high" : "standard",
+      navigation: candidate.navigation === "top" ? "top" : "side",
     };
   } catch {
     return { ...DEFAULT_DISPLAY };
@@ -66,6 +70,7 @@ export function applyDisplayPreferences(value: DisplayPreferences) {
   document.documentElement.dataset.theme = theme;
   document.documentElement.dataset.textSize = value.textSize;
   document.documentElement.dataset.contrast = value.contrast;
+  document.documentElement.dataset.nav = value.navigation;
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute("content", theme === "dark" ? "#14191e" : "#f5f7f9");

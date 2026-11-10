@@ -8,6 +8,13 @@ import {
 } from "../api/liveSystem";
 import { wetness } from "../api/environment";
 import { classifierLabels } from "../api/models";
+import {
+  listNodes,
+  slowedByHeat,
+  streamState,
+  thermalNotice,
+} from "../api/nodes";
+import { usePoll } from "../hooks/usePoll";
 import type { ClassifierMode } from "../types";
 import Icon, { type IconName } from "./Icon";
 import { formatRunDuration, formatRunNumber } from "./RunDetails";
@@ -42,6 +49,97 @@ const clock = (value: string | null | undefined) => {
       })
     : "—";
 };
+
+/** "Purple Sunbird 0.62 · Asian Koel 0.31" from the latest window's candidates. */
+export function topCandidates(value: unknown, limit = 3): string {
+  if (typeof value !== "string") return "—";
+  try {
+    const items = JSON.parse(value) as {
+      common_name?: string;
+      scientific_name?: string;
+      score?: number;
+    }[];
+    if (!Array.isArray(items) || !items.length) return "Nothing bird-like";
+    return items
+      .slice(0, limit)
+      .map(
+        (item) =>
+          `${item.common_name || item.scientific_name} ${Number(item.score).toFixed(2)}`,
+      )
+      .join(" · ");
+  } catch {
+    return "—";
+  }
+}
+
+/** The paired sensor node's own health: stream, temperature, heat protection, load. */
+function SensorNodeGroup() {
+  const nodes = usePoll(listNodes, 10000);
+  const node =
+    nodes.data?.nodes.find((item) => item.observing) ?? nodes.data?.nodes[0];
+  if (!node) return null;
+  const status = node.online ? node.status : null;
+  const stream = streamState(node);
+  const heat = thermalNotice(status?.thermal, status?.system.cpu_temperature_c);
+  return (
+    <Group
+      icon="node"
+      title={`Sensor node · ${node.name}`}
+      status={
+        <Status tone={stream.tone === "good" ? "good" : "warn"}>
+          {stream.label}
+        </Status>
+      }
+    >
+      <Row
+        label="CPU temperature"
+        value={number(status?.system.cpu_temperature_c, "°C")}
+      />
+      <Row
+        label="Heat protection"
+        value={
+          heat ??
+          (slowedByHeat(status?.system.power)
+            ? "Slowed by heat (firmware)"
+            : status?.thermal
+              ? `Normal · pauses at ${status.thermal.stop_c} °C`
+              : "—")
+        }
+      />
+      <Row label="CPU load (1 min)" value={number(status?.system.load_1m)} />
+      <Row
+        label="Memory in use"
+        value={number(status?.system.memory_used_percent, "%")}
+      />
+      <Row
+        label="Camera stream"
+        value={
+          status
+            ? `${status.camera_settings.resolution.replace("x", " × ")} · ${status.camera_settings.framerate} fps · ${
+                status.camera_settings.video_codec === "mjpeg"
+                  ? "MJPEG, decoded on this PC"
+                  : `${status.camera_settings.bitrate_kbps} kb/s H.264`
+              }`
+            : "—"
+        }
+      />
+      <Row
+        label="FALCON clock vs node"
+        value={clockDrift(status?.falcon_clock)}
+      />
+    </Group>
+  );
+}
+
+/** "+0.0 %" or "+9.9 % · too fast: times and sound windows are off" (over ≥ 5 minutes). */
+export function clockDrift(
+  clock: { drift_percent: number | null; warning: boolean } | undefined,
+): string {
+  if (!clock || clock.drift_percent === null) return "Measuring (5 min)…";
+  const value = `${clock.drift_percent >= 0 ? "+" : ""}${clock.drift_percent.toFixed(1)} %`;
+  if (!clock.warning) return value;
+  return `${value} · ${clock.drift_percent > 0 ? "too fast" : "too slow"}: times and sound windows are off`;
+}
 
 function freshness(reading: Reading<unknown>, now: number | null) {
   if (!reading.value) return reading.failed ? "Unavailable" : "Checking…";
@@ -238,7 +336,11 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
       : "—";
   const scope =
     host?.scope === "wsl"
-      ? "WSL Linux environment · CPU and RAM are not Windows host totals"
+      ? "WSL Linux environment · CPU and RAM are not Windows host totals" +
+        // WSL's "tsc" clock source was measured 10 % fast; see "FALCON clock vs node".
+        (host.clocksource === "tsc"
+          ? " · clock source tsc: check the clock row under Sensor node"
+          : "")
       : host?.scope === "linux"
         ? "Linux inference server"
         : host?.scope === "windows"
@@ -376,6 +478,29 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
             label="Audio gaps / reconnects"
             value={`${number(m.audio_discontinuities, "", true)} / ${number(m.audio_reconnects, "", true)}`}
           />
+          {/* Sound analysis: what BirdNET heard in the latest window, even below the
+              confidence needed to record an observation. */}
+          <Row
+            label="Last sound window"
+            value={
+              typeof m.audio_last_window_at === "string"
+                ? clock(m.audio_last_window_at)
+                : "—"
+            }
+          />
+          <Row label="Sound level" value={number(m.audio_level_dbfs, "dBFS")} />
+          <Row
+            label="Sound analysis"
+            value={
+              typeof m.audio_stalled_since === "string" && m.audio_stalled_since
+                ? `Stalled since ${clock(m.audio_stalled_since)}${Number(m.audio_stall_restarts) ? ` · node stream restarted ${m.audio_stall_restarts}×` : ""}`
+                : "Running"
+            }
+          />
+          <Row
+            label="Top candidates"
+            value={topCandidates(m.audio_top_candidates)}
+          />
         </Group>
       </div>
       <section className="live-system-host" aria-label="Processing computer">
@@ -501,6 +626,18 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
             }
           />
           <Row
+            label="Camera day/night switching"
+            value={
+              Number(m.camera_flicker) === 1
+                ? "Camera switching day/night · detections paused"
+                : `Steady${Number(m.camera_flicker_episodes) ? ` · ${m.camera_flicker_episodes} pause(s) this session, ${Number(m.flicker_suppressed) || 0} detections held back` : ""}`
+            }
+          />
+          <Row
+            label="Scenery ignored"
+            value={`${Number(m.scenery_boxes) || 0} boxes${Number(m.still_object_suppressed) ? ` · ${m.still_object_suppressed} detections held back this session` : ""}`}
+          />
+          <Row
             label="Processing / target rate"
             value={`${number(snapshot.processedFps, "fps")} / ${number(m.sample_fps, "fps")}`}
           />
@@ -568,6 +705,7 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
           />
           <Row label="Observation clock" value="Server receive time" />
         </Group>
+        <SensorNodeGroup />
       </div>
       <section
         className="live-system-environment"

@@ -41,6 +41,76 @@ export function ResourceNotice({
   return null;
 }
 
+interface LanState {
+  enabled: boolean;
+  code: string;
+  addresses: string[];
+}
+
+/**
+ * Phone on home Wi-Fi: the addresses to type and the access code. Shown only on the
+ * FALCON computer itself (a phone is refused /api/remote/lan, so nothing renders).
+ */
+export function PhoneAccess() {
+  const [lan, setLan] = useState<LanState | null>(null);
+  const [showCode, setShowCode] = useState(false);
+  useEffect(() => {
+    let live = true;
+    api<LanState>("/remote/lan")
+      .then((state) => live && setLan(state))
+      .catch(() => live && setLan(null));
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!lan) return null;
+  return (
+    <section
+      className="device-access-section"
+      aria-labelledby="phone-access-heading"
+    >
+      <div className="device-access-heading">
+        <Icon name="link" size={22} />
+        <div>
+          <h3 id="phone-access-heading">Phone on home Wi-Fi</h3>
+          <p>{lan.enabled ? "On · same Wi-Fi only" : "Off"}</p>
+        </div>
+      </div>
+      {lan.enabled && (
+        <>
+          <div className="device-share-address">
+            {lan.addresses.map((address) => (
+              <label key={address}>
+                Address
+                <input
+                  readOnly
+                  value={address}
+                  onFocus={(event) => event.target.select()}
+                />
+              </label>
+            ))}
+          </div>
+          <div className="device-connectivity">
+            <span>
+              Access code · {showCode ? <strong>{lan.code}</strong> : "hidden"}
+            </span>
+            <button
+              className="text-button"
+              onClick={() => setShowCode((value) => !value)}
+            >
+              {showCode ? "Hide" : "Show"}
+            </button>
+          </div>
+          <small>
+            Type the code once on the phone. The .local name works on iPhones
+            and recent Android phones; the number works everywhere.
+          </small>
+        </>
+      )}
+    </section>
+  );
+}
+
 export function StartupControls({
   appliance,
   pending,
@@ -366,6 +436,7 @@ export default function DeviceAccess() {
             />
           )}
         </section>
+        <PhoneAccess />
       </div>
     </section>
   );

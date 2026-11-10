@@ -1863,6 +1863,21 @@ dialog::backdrop {
 .live-preview img {
   min-height: 370px;
 }
+.live-preview {
+  min-height: 370px;
+}
+.live-reconnecting {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  background: var(--media-overlay);
+  color: var(--media-text);
+  padding: 8px 10px;
+  border-radius: 5px;
+  font-size: 0.8125rem;
+  line-height: 1.35;
+}
 .stop-button {
   border-color: var(--danger-line);
   color: var(--muted);

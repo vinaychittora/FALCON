@@ -22,10 +22,19 @@ import psutil
 ROOT = Path(__file__).resolve().parents[1]
 PORT = 8000
 URL = f"http://127.0.0.1:{PORT}"
+# All interfaces, so phone access on the home network can work. The application itself
+# still refuses every device except this computer unless phone access with an access
+# code is switched on (app/lan_access.py).
+HOST = "0.0.0.0"
 SERVER_ARGUMENTS = [
-    "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1",
+    "-m", "uvicorn", "app.main:app", "--host", HOST,
     "--port", str(PORT), "--workers", "1", "--no-access-log", "--no-proxy-headers",
+    # An open browser stream (live preview, Listen) must not keep "make stop" waiting forever.
+    "--timeout-graceful-shutdown", "10",
 ]
+# Instances started by earlier versions of this script stay manageable.
+_LOOPBACK = [("127.0.0.1" if value == HOST else value) for value in SERVER_ARGUMENTS]
+PREVIOUS_ARGUMENTS = [_LOOPBACK, _LOOPBACK[:-2], _LOOPBACK[:-3]]
 
 
 def process_identity(pid: int) -> str | None:
@@ -42,9 +51,8 @@ def process_identity(pid: int) -> str | None:
 def server_command(pid: int) -> bool:
     try:
         command = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
-        expected = [value.encode() for value in SERVER_ARGUMENTS]
-        # Keep ownership of instances launched before the explicit proxy-header flag.
-        return command[1:-1] in (expected, expected[:-1])
+        known = [SERVER_ARGUMENTS, *PREVIOUS_ARGUMENTS]
+        return command[1:-1] in [[value.encode() for value in arguments] for arguments in known]
     except OSError:
         return False
 
@@ -71,7 +79,7 @@ def listening(pid: int) -> bool:
     try:
         return any(
             connection.status == psutil.CONN_LISTEN
-            and connection.laddr.ip == "127.0.0.1"
+            and connection.laddr.ip in {"127.0.0.1", HOST}
             and connection.laddr.port == PORT
             for connection in psutil.Process(pid).net_connections(kind="tcp")
         )

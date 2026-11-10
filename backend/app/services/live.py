@@ -1,38 +1,105 @@
 """One local live session, using the same model lease as uploaded-file analysis."""
 
+import dataclasses
 import fcntl
 import importlib
 import io
+import json
+import math
 import queue
 import tempfile
 import threading
 import time
 import wave
-from collections import deque
+from collections import Counter, deque
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import BinaryIO, Literal, cast
+from typing import Any, BinaryIO, Literal, cast
 from uuid import uuid4
 
+import numpy as np
 from PIL import Image
 
 from app.inference.birdnet import BirdNET
+from app.inference.bouts import SoundBouts
 from app.inference.classifier_models import classifier_versions
-from app.inference.pipeline import Cancelled, visual_pipeline
+from app.inference.flicker import CameraMove, FlickerGuard, mean_brightness, small_grey
+from app.inference.insects import InsectNight
+from app.inference.pipeline import Cancelled, CropBudget, frame_chroma, visual_pipeline
+from app.inference.privacy import expand, redact_rgb
+from app.inference.tiers import RANK, GroupIndex, TierCounter
+from app.inference.visits import Closed, VisitEngine
 from app.media.base import Frame
+from app.media.denoise import Denoiser
+from app.media.night import NightPicture
 from app.media.rtsp_source import AudioChunk, RTSPSource
-from app.schemas import AnalysisSettings, AudioEvent, Review, Video, VisualEvent
+from app.media.sun import sun_phase
+from app.schemas import AnalysisSettings, AudioEvent, BBox, Review, Video, VisualEvent
 from app.schemas_live import LiveStart, LiveState
 from app.services.analyzer import Analyzer
+from app.services.box_evidence import BoxEvidence
 from app.services.clock import SessionClock, system_clock_synchronized
 from app.services.encounter_evidence import EncounterEvidence
 from app.services.model_registry import package_version
 from app.services.thumbnails import ThumbnailService
 from app.storage.evidence import EvidenceStore
+from app.storage.visits import VisitStore
 from app.taxonomy.inaturalist import TaxaCache
+
+# No sound window for this long while the picture is live counts as a sound stall.
+SOUND_STALL_SECONDS = 180
+SOUND_RESTART_GAP_SECONDS = 1800
+SOUND_CHECK_SECONDS = 15.0
+
+
+def pcm_level_dbfs(pcm: bytes) -> float:
+    """RMS level of 16-bit PCM in dBFS (−120 for silence)."""
+    samples = np.frombuffer(pcm[: len(pcm) - len(pcm) % 2], dtype="<i2").astype(np.float64)
+    if not samples.size:
+        return -120.0
+    rms = float(np.sqrt(np.mean(samples**2))) / 32768.0
+    return round(20 * math.log10(rms), 1) if rms > 1e-6 else -120.0
 
 
 class LiveService:
+    def _flicker_changed(self, change: str, guard: "FlickerGuard") -> None:
+        """Show and log when the camera starts or stops hunting between day and night."""
+        holding = change == "started"
+        with self._mutex:
+            self._state.metrics["camera_flicker"] = 1 if holding else 0
+            self._state.metrics["camera_flicker_episodes"] = guard.episodes
+        self._message(
+            "Camera switching day/night: detections paused until the picture is steady."
+            if holding else "Camera picture steady again: detections resumed."
+        )
+        try:
+            path = self._diagnostics() / "camera-flicker.jsonl"
+            with path.open("a") as output:
+                output.write(json.dumps({"at": datetime.now(UTC).isoformat(timespec="seconds"), "event": change}) + "\n")
+        except OSError:
+            pass
+
+    def _diagnostics(self) -> Path:
+        """Diagnostic logs; not data/logs, which holds the observation records."""
+        path = self.analyzer.settings.data_dir / "diagnostics"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def _log_sound_window(
+        self, heard_at: str, level: float, metrics: dict[str, float | int | str], detections: int,
+    ) -> None:
+        """One line per analyzed sound window, for diagnosing what BirdNET hears."""
+        try:
+            path = self._diagnostics() / "sound-windows.jsonl"
+            with path.open("a") as output:
+                output.write(json.dumps({
+                    "at": heard_at, "level_dbfs": level, "detections": detections,
+                    "top": json.loads(str(metrics.get("audio_top_candidates") or "[]")),
+                }) + "\n")
+        except (OSError, ValueError):
+            pass
+
     def __init__(
         self, analyzer: Analyzer, evidence_store: EvidenceStore | None = None,
         thumbnails: ThumbnailService | None = None,
@@ -40,6 +107,18 @@ class LiveService:
         self.analyzer = analyzer
         self.evidence_store = evidence_store
         self.thumbnails = thumbnails
+        # Set by the app: the night-picture mode FALCON must apply for the observed
+        # node ("auto" / "colour" / "mono"), or None when the node applies it itself.
+        self.night_mode: Callable[[], str | None] | None = None
+        # Set by the app: restart the observed node's stream (sound self-heal).
+        self.restart_stream: Callable[[], object] | None = None
+        self.node_temperature: Callable[[], float | None] | None = None  # observed node, for the night log
+        self._keep_scenery: Callable[[bool], None] | None = None
+        self._box_log: BoxEvidence | None = None
+        self._visits: VisitEngine | None = None
+        self._close_visits: Callable[[list[Closed]], None] | None = None
+        self._paused_since: str | None = None  # detection paused for camera work (survives sessions)
+        self._last_chunk_at = 0.0
         self._evidence: EncounterEvidence | None = None
         self._mutex = threading.RLock()
         self._state = LiveState()
@@ -54,6 +133,10 @@ class LiveService:
         self._audio_queue: queue.Queue[AudioChunk] = queue.Queue(maxsize=1)
         self._lease: BinaryIO | None = None
         self._clock: SessionClock | None = None
+        # People last seen by the detector: (session ms, padded boxes). The preview
+        # masks them until the next analyzed frame says they are gone.
+        self._people: tuple[int, list[BBox]] = (-100000, [])
+        self._people_hold_ms = 2500
         # Monotonic times used to detect a session that stops making progress.
         self._progress_at = 0.0
         self._stopping_since = 0.0
@@ -81,6 +164,7 @@ class LiveService:
                 self._fresh_ms = min(4000, max(1500, round(2000 / request.config.sample_fps)))
                 self._audio.clear()
                 self._audio_queue = queue.Queue(maxsize=1)
+                self._people = (-100000, [])
                 started_at = datetime.now(UTC)
                 self._clock = SessionClock(started_at, self._started)
                 self._state = LiveState(
@@ -100,6 +184,7 @@ class LiveService:
                         "dropped_audio_chunks": 0,
                         "preview_max_fps": 5,
                         "audio_window_seconds": 9,
+                        "people_frames_masked": 0,
                         "clock": "session receive time; not a synchronized camera clock",
                     },
                     messages=[
@@ -138,9 +223,65 @@ class LiveService:
             worker.join(timeout=15)
         return self.state()
 
+    def pause(self, paused: bool) -> LiveState:
+        """Pause detection for camera work (moving the node, refilling the bowl).
+
+        While paused no frame reaches detection: no tracks, visits, spot learning,
+        clips or bells; the picture and sound keep running. On resume every learned
+        spot is stale (not suppressing) until it is found again, because the camera
+        may have moved.
+        """
+        with self._mutex:
+            if paused == (self._paused_since is not None):
+                return self.state()
+            self._paused_since = datetime.now(UTC).isoformat() if paused else None
+            self._state.visual = []
+            visits, box_log = self._visits, self._box_log
+        if visits is not None and self._close_visits is not None and paused:
+            self._close_visits(visits.close_all(time.time(), "PAUSE"))
+        if not paused and visits is not None:
+            visits.mark_stale()
+            if self._keep_scenery:
+                self._keep_scenery(True)
+        if box_log is not None:
+            try:
+                box_log.note("PAUSE" if paused else "RESUME")
+            except OSError:
+                pass
+        self._message("Detection paused for camera work." if paused else "Detection resumed; scenery is re-learned.")
+        return self.state()
+
+    def _scenery_path(self) -> Path:
+        return self.analyzer.settings.data_dir / "state" / "scenery.json"
+
+    def scenery(self) -> dict[str, object]:
+        """Learned spots (the bowl, a stone): count and kinds, for the settings page."""
+        visits = self._visits
+        if visits is None:
+            visits = VisitEngine()
+            visits.load(self._scenery_path(), time.time())
+        return {"spots": len(visits.spots), "stale": sum(1 for s in visits.spots if s.stale),
+                "kinds": dict(Counter(s.kind for s in visits.spots))}
+
+    def forget_scenery(self) -> dict[str, object]:
+        """Forget every learned spot; they are learned again from the next 3 still minutes."""
+        visits = self._visits
+        if visits is not None:
+            visits.forget_all()
+            if self._keep_scenery:
+                self._keep_scenery(True)
+        else:
+            stored = VisitEngine()
+            stored.load(self._scenery_path(), time.time())
+            stored.forget_all()
+            stored.save(self._scenery_path(), time.time())
+        self._message("All learned scenery forgotten; it is learned again.")
+        return self.scenery()
+
     def state(self) -> LiveState:
         with self._mutex:
             result = self._state.model_copy(deep=True)
+            result.detection_paused_since = self._paused_since
             if self._started and result.status in {
                 "connecting",
                 "live",
@@ -201,6 +342,36 @@ class LiveService:
                 return None
             return self._preview
 
+    def listen(self, denoise: bool = False) -> Iterator[bytes] | None:
+        """Live sound for the web UI while a session with audio runs, else None.
+
+        Yields 48 kHz mono 16-bit PCM as it is decoded, until the session ends or the
+        source goes quiet for 10 s. Kept in memory only: nothing is written anywhere.
+        `denoise` cleans only this listener's copy; BirdNET and clips are unaffected.
+        """
+        with self._mutex:
+            source = self._source
+            active = self._state.status in {"live", "reconnecting", "connecting"}
+        if source is None or not active or not source.audio_enabled:
+            return None
+        mailbox = source.listen()
+        cleaner = Denoiser() if denoise else None
+
+        def stream() -> Iterator[bytes]:
+            try:
+                while not source.cancel.is_set():
+                    try:
+                        chunk = mailbox.get(timeout=10)
+                    except queue.Empty:
+                        return
+                    chunk = cleaner.process(chunk) if cleaner else chunk
+                    if chunk:
+                        yield chunk
+            finally:
+                source.stop_listening(mailbox)
+
+        return stream()
+
     def update_review(self, event_id: str, review: Review) -> None:
         with self._mutex:
             events: list[VisualEvent | AudioEvent] = [*self._state.visual, *self._audio]
@@ -242,10 +413,18 @@ class LiveService:
             self._state.audio_status = value
 
     def _frame(self, frame: Frame) -> None:
-        preview = Image.fromarray(frame.rgb)
-        preview.thumbnail((1280, 1280))
+        with self._mutex:
+            seen_ms, boxes = self._people
+            hold = self._people_hold_ms
+        rgb = frame.rgb
+        if boxes and 0 <= frame.timestamp_ms - seen_ms <= hold:
+            rgb = redact_rgb(rgb, boxes)
+        preview = Image.fromarray(rgb)
+        # Full camera size up to 1080p: shrinking to 1280 wide and re-saving at quality
+        # 80 visibly blurred a camera that is already soft (8 Nov). About 5 frames a second.
+        preview.thumbnail((1920, 1920))
         output = io.BytesIO()
-        preview.save(output, format="JPEG", quality=80)
+        preview.save(output, format="JPEG", quality=90)
         with self._mutex:
             if self._cancel.is_set():
                 return
@@ -254,7 +433,58 @@ class LiveService:
             self._state.preview_timestamp_ms = frame.timestamp_ms
             self._state.metrics.update({"width": frame.rgb.shape[1], "height": frame.rgb.shape[0]})
 
+    def _people_seen(self, frame: Frame, boxes: list[BBox]) -> None:
+        """The pipeline reports people in every analyzed frame, present or not."""
+        padded = [expand(box, 0.25) for box in boxes]
+        with self._mutex:
+            self._people = (frame.timestamp_ms, padded)
+            if padded:
+                self._state.metrics["people_frames_masked"] = (
+                    int(self._state.metrics.get("people_frames_masked", 0)) + 1
+                )
+        if self._evidence:
+            self._evidence.people(frame.timestamp_ms, boxes)
+
+    def _watch_sound(self) -> None:
+        """Self-heal a silent sound track while the picture keeps coming.
+
+        This morning the node's stream carried no sound for 52 minutes and only a
+        node restart brought it back. If no sound window arrives for SOUND_STALL_SECONDS
+        while the session is live, the stall is shown on Live and the node is asked to
+        restart its stream, at most once per SOUND_RESTART_GAP_SECONDS.
+        """
+        last_restart = -float(SOUND_RESTART_GAP_SECONDS)
+        while not self._cancel.wait(SOUND_CHECK_SECONDS):
+            now = time.monotonic()
+            silent = now - (self._last_chunk_at or self._started)
+            with self._mutex:
+                live = self._state.status == "live"
+                stalled = self._state.metrics.get("audio_stalled_since")
+            if not live or silent < SOUND_STALL_SECONDS:
+                if stalled:
+                    with self._mutex:
+                        self._state.metrics["audio_stalled_since"] = ""
+                    self._message("Sound analysis is running again.")
+                continue
+            if not stalled:
+                since = (datetime.now(UTC) - timedelta(seconds=silent)).isoformat(timespec="seconds")
+                with self._mutex:
+                    self._state.metrics["audio_stalled_since"] = since
+                self._message("No sound has reached FALCON for 3 minutes while the picture is live.")
+            if self.restart_stream and now - last_restart >= SOUND_RESTART_GAP_SECONDS:
+                last_restart = now
+                with self._mutex:
+                    self._state.metrics["audio_stall_restarts"] = (
+                        int(self._state.metrics.get("audio_stall_restarts") or 0) + 1
+                    )
+                self._message("Asking the sensor node to restart its stream to recover the sound.")
+                try:
+                    self.restart_stream()
+                except Exception:  # noqa: BLE001 - the node may be busy; try again later
+                    pass
+
     def _chunk(self, chunk: AudioChunk) -> None:
+        self._last_chunk_at = time.monotonic()
         try:
             self._audio_queue.put_nowait(chunk)
         except queue.Full:
@@ -292,13 +522,15 @@ class LiveService:
                         session_id, source_id, request.name, self._state.started_at,
                         {
                             **config.model_dump(mode="json"), "evidence_mode": "encounter_clips",
-                            "evidence_seconds": 5, "sensor_id": self._session_sensor_id(),
+                            "evidence_seconds": config.clip_pre_seconds + config.clip_post_seconds,
+                            "sensor_id": self._session_sensor_id(),
                             **({} if synchronized is None else {"clock_synchronized": synchronized}),
                         },
                     )
                     self._evidence = EncounterEvidence(
                         self.evidence_store, session_id, source_id, self._state.started_at,
                         clock=self._clock.at if self._clock else None,
+                        pre_seconds=config.clip_pre_seconds, post_seconds=config.clip_post_seconds,
                     )
                 except Exception:
                     self._message("Evidence recording is unavailable. Observations will still be saved; check local storage.")
@@ -317,10 +549,20 @@ class LiveService:
                 self._audio_status,
                 config.audio_enabled,
                 recorder=self._evidence.recorder if self._evidence else None,
+                # A pass-through node leaves the night picture to FALCON.
+                night=NightPicture(
+                    self.night_mode,
+                    site=(config.site_lat, config.site_lon)
+                    if config.site_lat is not None and config.site_lon is not None else None,
+                ) if self.night_mode else None,
+                crop=(config.crop_left_percent, config.crop_right_percent),
+                audio_url=request.audio_url.get_secret_value() if request.audio_url else None,
             )
             capture = threading.Thread(target=self._source.run, daemon=True, name="falcon-rtsp")
             capture.start()
             if config.audio_enabled:
+                self._last_chunk_at = 0.0
+                threading.Thread(target=self._watch_sound, daemon=True, name="falcon-sound-watch").start()
                 audio = threading.Thread(
                     target=self._listen,
                     args=(config, taxa, session_id, source_id, request.name),
@@ -343,9 +585,20 @@ class LiveService:
             if self._source.audio_only:
                 with self._mutex:
                     self._state.metrics.update({"inference_status": "audio only", "audio_only": 1})
-                self._message("This source has no camera; only sound is analyzed.")
-                self._cancel.wait()
-                raise Cancelled()
+                self._message("This source has no camera right now; only sound is analyzed.")
+                # A sensor node's camera can come back (it restarts, or is switched on
+                # again): keep waiting for video instead of ending picture analysis.
+                source = self._source
+                while not self._cancel.is_set() and source.audio_only:
+                    with source.condition:
+                        source.condition.wait_for(
+                            lambda: self._cancel.is_set() or not source.audio_only, timeout=1.0,
+                        )
+                if self._cancel.is_set():
+                    raise Cancelled()
+                with self._mutex:
+                    self._state.metrics.update({"audio_only": 0})
+                self._message("The camera is back; starting picture analysis.")
             with self._mutex:
                 self._state.metrics["inference_status"] = "loading models"
             import torch
@@ -382,6 +635,7 @@ class LiveService:
             )
             with self._mutex:
                 self._fresh_ms = min(4000, max(1500, round(2000 / config.sample_fps)))
+                self._people_hold_ms = min(5000, max(2500, round(2500 / config.sample_fps)))
                 self._state.metrics.update(
                     {
                         "device": self.analyzer.registry.device,
@@ -392,7 +646,237 @@ class LiveService:
                 )
                 self._progress_at = time.monotonic()
 
+            guard = FlickerGuard(
+                step=config.flicker_step, flips_per_minute=config.flicker_flips_per_minute,
+                hold_seconds=config.flicker_hold_seconds,
+            )
+            # Visits form by motion, identity and position memory (spec Phase 1, P2).
+            # Spots (the bowl) and visits cut by a restart are remembered on disk.
+            visits = VisitEngine(
+                still_minutes=config.still_object_minutes, scenery_hours=config.scenery_forget_hours,
+                similarity=config.likely_similarity, gap=config.likely_margin,
+            )
+            scenery_path = self.analyzer.settings.data_dir / "state" / "scenery.json"
+            visits.load(scenery_path, time.time())
+            visit_store = VisitStore(self.analyzer.events.database)
+            scenery_saved = [time.monotonic()]
+            known_spots = {spot.spot_id for spot in visits.spots}
+
+            def keep_scenery(force: bool = False) -> None:
+                if visits.dirty and (force or time.monotonic() - scenery_saved[0] >= 60):
+                    try:
+                        visits.save(scenery_path, time.time())
+                    except OSError:
+                        pass
+                    scenery_saved[0] = time.monotonic()
+                current = {spot.spot_id for spot in visits.spots}
+                if current != known_spots and box_log is not None:
+                    for spot in visits.spots:
+                        if spot.spot_id not in known_spots:
+                            box_log.spot("created", spot)
+                    for gone in known_spots - current:
+                        box_log.spot("expired", None, gone)
+                known_spots.clear()
+                known_spots.update(current)
+                with self._mutex:
+                    self._state.metrics["scenery_boxes"] = len(visits.spots)
+
+            groups = GroupIndex.load(self.analyzer.settings.data_dir / "taxa" / "groups.json")
+            counters: dict[str, TierCounter] = {}
+
+            def grade(visit_id: str, promoted: bool, frames: int, box: Any, top: Any) -> None:
+                """P5: a visit's tier by counting classified frames; it only rises."""
+                counter = counters.setdefault(visit_id, TierCounter(
+                    similarity=config.likely_similarity, gap=config.likely_margin, groups=groups))
+                before = (counter.best.tier, counter.best.name) if counter.best else None
+                result = counter.add(time.time(), box, top)
+                if (result.tier, result.name) == before:
+                    return
+                fields: dict[str, Any] = {
+                    "tier": result.tier, "name": result.name, "taxon_id": result.taxon_id,
+                    "reasons": result.reasons, "qualifying": result.qualifying,
+                    "group_qualifying": result.group_qualifying, "majority": round(result.majority, 3),
+                    "span": round(result.span, 2), "vote": None if result.vote is None else round(result.vote, 3),
+                    "tier_path": [[round(t, 1), tier, why] for t, tier, why in counter.path],
+                }
+                stored = visit_store.get(visit_id) or {}
+                if before and RANK[result.tier] < RANK[before[0]]:
+                    # SIZE pulled a Likely visit back (hands on the camera): logged with
+                    # whether its bell had already rung.
+                    fields["size_demoted"] = {"at": datetime.now(UTC).isoformat(), "from": before[0],
+                                              "after_bell": bool(stored.get("bell_at"))}
+                if result.tier in {"likely", "likely_group"} and promoted and frames >= 2 and not stored.get("bell_at"):
+                    fields["bell_at"] = datetime.now(UTC).isoformat()  # Live shows it, the bell rings
+                visit_store.upsert(visit_id, session_id, stored.get("hidden_reason"), **fields)
+
+            insects: dict[str, InsectNight] = {}
+
+            def insect_hidden(visit_id: str) -> bool:
+                stats = insects.get(visit_id)
+                return stats is not None and stats.hidden  # fixed behaviour, no setting (Vinay, 9 Nov)
+
+            def is_night() -> bool:
+                """Between sunset and sunrise at the site (the Night picture's clock)."""
+                if config.site_lat is None or config.site_lon is None:
+                    return False
+                return sun_phase(datetime.now(UTC), config.site_lat, config.site_lon) != "day"
+
+            def closed_visits(items: list[Closed]) -> None:
+                for item in items:
+                    counter = counters.pop(item.visit_id, None)
+                    if item.frames == 0:
+                        insects.pop(item.visit_id, None)
+                        continue  # only spot hits: nothing was recorded, nothing to show
+                    hidden = item.hidden
+                    if hidden is None and insect_hidden(item.visit_id):
+                        hidden = "INSECT_NIGHT"
+                    insects.pop(item.visit_id, None)
+                    if hidden == "UNIDENTIFIED" and counter and counter.best and counter.best.tier.startswith("likely"):
+                        hidden = None  # a name earned by counting outranks the median-frame rule
+                    try:
+                        visit_store.upsert(
+                            item.visit_id, session_id, hidden, close_reason=item.reason,
+                            closed_at=datetime.now(UTC).isoformat(), frames=item.frames, spot_hits=item.hits,
+                            promoted=item.promoted, spot_id=item.spot_id, continuations=item.continuations,
+                        )
+                    except Exception:  # noqa: BLE001 - observation goes on
+                        pass
+
+            self._keep_scenery = keep_scenery
+            self._visits = visits
+            self._close_visits = closed_visits
+            crop_info: dict[str, dict[str, object]] = {}
+            # Research log: every box and visit, measured; it changes no decision.
+            box_log: BoxEvidence | None = None
+            try:
+                box_log = BoxEvidence(self.analyzer.settings.data_dir / "diagnostics" / "evidence", config)
+            except OSError:
+                box_log = None
+            self._box_log = box_log
+            keep_scenery()
+
+            def measured(event: VisualEvent, info: dict[str, object], embedding: Any) -> None:
+                crop_info[event.event_id] = info
+                if box_log is not None:
+                    box_log.measured(event, info, embedding)
+
+            def log_box(event: VisualEvent, stay_put: str, guard_state: str) -> None:
+                if box_log is None:
+                    return
+                try:
+                    box_log.record(event, stay_put=stay_put, guard=guard_state)
+                except Exception:  # noqa: BLE001 - the log must never stop observation
+                    pass
+
+            live_source = self._source
+            camera = CameraMove()
+            held_since = [0.0]
+
+            class GuardedSource:
+                """The live frames, with the camera's day/night hunting measured on the way."""
+
+                def frames(inner, fps: float, max_seconds: float | None = None) -> Iterator[Frame]:  # noqa: N805
+                    for frame in live_source.frames(fps, max_seconds):
+                        if self._paused_since is not None:
+                            continue  # camera work: nothing reaches detection
+                        now = time.monotonic()
+                        night = frame.greyscale or frame_chroma(frame.rgb) < 0.03
+                        moved = camera.observe(small_grey(frame.rgb), night, now)
+                        if moved == "jump":
+                            guard.flip(now)  # the whole picture jumped: counts as a flicker flip
+                        elif moved == "shift":
+                            # The camera now points elsewhere: no learned spot suppresses
+                            # until it is found again.
+                            visits.mark_stale()
+                            keep_scenery(True)
+                            self._message("The camera view moved; scenery is re-learned.")
+                            if box_log is not None:
+                                box_log.note("CAMERA_SHIFT")
+                            with self._mutex:
+                                self._state.metrics["camera_shifts"] = int(self._state.metrics.get("camera_shifts") or 0) + 1
+                        with self._mutex:
+                            self._state.metrics["frame_difference"] = round(camera.last_difference, 1)
+                        if box_log is not None:
+                            try:
+                                box_log.frame(camera.last_difference,
+                                              self.node_temperature() if self.node_temperature else None)
+                            except Exception:  # noqa: BLE001 - the log must never stop observation
+                                pass
+                        change = guard.observe(mean_brightness(frame.rgb), now)
+                        if change:
+                            self._flicker_changed(change, guard)
+                        if guard.holding:
+                            # Day/night hunting: nothing is detected, tracks and visits
+                            # do not age, nothing new forms (spec P3).
+                            held_since[0] = held_since[0] or now
+                            continue
+                        if held_since[0]:
+                            suspended = now - held_since[0]
+                            held_since[0] = 0.0
+                            visits.suspend(suspended)
+                            if box_log is not None:
+                                box_log.note(f"SUSPENDED {suspended:.0f}s")
+                            frame = dataclasses.replace(frame, suspended_ms=round(suspended * 1000))
+                        yield frame
+
             def emit(event: VisualEvent) -> None:
+                if guard.holding:
+                    # The camera is switching between day and night: these are
+                    # brightness flips, not animals. No record, clip or bell.
+                    with self._mutex:
+                        self._state.metrics["flicker_suppressed"] = (
+                            int(self._state.metrics.get("flicker_suppressed") or 0) + 1
+                        )
+                    event.captured_at = self._clock.at(event.timestamp_ms).isoformat() if self._clock else None
+                    crop_info.pop(event.event_id, None)
+                    log_box(event, "not checked", "flicker")
+                    return
+                info = crop_info.pop(event.event_id, {})
+                chroma = info.get("frame_chroma")
+                light = "night" if info.get("greyscale") or (chroma is not None and float(chroma) < 0.03) else "day"  # type: ignore[arg-type]
+                top = [tuple(entry) for entry in info.get("top10") or []]  # type: ignore[attr-defined]
+                decision = visits.observe(
+                    event.track_id, event.bbox_norm, time.time(), top or None, light,  # type: ignore[arg-type]
+                    new_id=f"{session_id}:{event.track_id}",
+                )
+                event.captured_at = self._clock.at(event.timestamp_ms).isoformat() if self._clock else None
+                log_box(event, f"hit:{decision.spot_id}" if decision.action == "hit" else decision.state, "none")
+                if decision.action == "hit":
+                    # A known spot (the bowl, a stone): counted, never recorded.
+                    with self._mutex:
+                        self._state.metrics["still_object_suppressed"] = (
+                            int(self._state.metrics.get("still_object_suppressed") or 0) + 1
+                        )
+                    keep_scenery()
+                    return
+                event.visit_id = decision.visit_id
+                stats = insects.setdefault(decision.visit_id, InsectNight())
+                was_hidden = insect_hidden(decision.visit_id)
+                stats.add(is_night() or (config.site_lat is None and light == "night"),
+                          [entry[2] for entry in top[:5]] if top else None)  # type: ignore[index]
+                try:
+                    if decision.promoted_now:
+                        visit_store.upsert(decision.visit_id, session_id,
+                                           "INSECT_NIGHT" if insect_hidden(decision.visit_id) else None,
+                                           promoted=decision.promoted_now,
+                                           promoted_at=datetime.now(UTC).isoformat(), spot_id=decision.spot_id)
+                    elif decision.state == "visit" and insect_hidden(decision.visit_id) != was_hidden:
+                        # An open visit turns out to be (or not to be) an insect at night.
+                        visit_store.upsert(decision.visit_id, session_id,
+                                           "INSECT_NIGHT" if insect_hidden(decision.visit_id) else None)
+                    elif visit_store.get(decision.visit_id) is None:
+                        visit_store.upsert(decision.visit_id, session_id,
+                                           "CANDIDATE" if decision.state == "candidate" else None,
+                                           started_at=datetime.now(UTC).isoformat())
+                except Exception:  # noqa: BLE001 - observation goes on
+                    pass
+                try:
+                    state = visits.open.get(event.track_id)
+                    grade(decision.visit_id, decision.state == "visit", state.frames if state else 1,
+                          event.bbox_norm, top or None)
+                except Exception:  # noqa: BLE001
+                    pass
+                keep_scenery()
                 event.source_kind = "live"
                 event.time_basis = "server_receive_time"
                 event.captured_at = self._clock.at(event.timestamp_ms).isoformat() if self._clock else None
@@ -410,7 +894,24 @@ class LiveService:
                         int(self._state.metrics["visual_detections"]) + 1
                     )
 
+            dropped_minute: deque[tuple[float, int]] = deque()
+
+            def live_metrics(values: dict[str, float | int | str]) -> None:
+                # Classification counts while observing, and crops dropped in the last minute.
+                now = time.monotonic()
+                dropped = int(values.get("crops_dropped") or 0)
+                dropped_minute.append((now, dropped))
+                while dropped_minute and now - dropped_minute[0][0] > 60:
+                    dropped_minute.popleft()
+                with self._mutex:
+                    for key in ("classified_crops", "classifier_ms_per_crop", "crops_dropped",
+                                "crop_budget_per_second", "sampled_frames"):
+                        if key in values:
+                            self._state.metrics[key] = values[key]
+                    self._state.metrics["crops_dropped_last_minute"] = dropped - dropped_minute[0][1]
+
             def progress(coverage: int) -> None:
+                closed_visits(visits.tick(time.time()))
                 with self._mutex:
                     self._progress_at = time.monotonic()
                     frame_time = coverage - round(1000 / config.sample_fps)
@@ -424,7 +925,7 @@ class LiveService:
                     )
 
             metrics = visual_pipeline(
-                self._source,
+                GuardedSource(),
                 video,
                 session_id,
                 config,
@@ -438,6 +939,14 @@ class LiveService:
                 self.analyzer.sensors,
                 frame_context=self._evidence.frame_context if self._evidence else None,
                 crop_sink=self.thumbnails.remember if self.thumbnails else None,
+                frame_people=self._people_seen,
+                box_sink=measured,
+                # Every crop is classified within 10 per second (1 on a slow CPU),
+                # moving candidates first and scenery spot hits last.
+                budget=CropBudget(),
+                spot_check=lambda box: visits.spot_for(box) is not None,
+                linking="continuity",
+                metrics_progress=live_metrics,
             )
             with self._mutex:
                 self._state.metrics.update(metrics)
@@ -450,6 +959,20 @@ class LiveService:
                 self._state.error = f"Live analysis failed ({type(exc).__name__}). Check model availability and camera settings."
         finally:
             self._cancel.set()
+            if self._visits is not None and self._close_visits is not None:
+                # Open visits close as RESTART; a new track there within 120 s continues them.
+                self._close_visits(self._visits.close_all(time.time(), "RESTART"))
+            if self._keep_scenery:
+                self._keep_scenery(True)  # save what this session learned
+                self._keep_scenery = None
+            if self._box_log:
+                try:
+                    self._box_log.close()  # close every open visit in the log
+                except Exception:  # noqa: BLE001
+                    pass
+                self._box_log = None
+            self._visits = None
+            self._close_visits = None
             for worker in (capture, audio):
                 if worker:
                     # Keep the lease until all capture/analysis subprocesses have stopped.
@@ -513,6 +1036,8 @@ class LiveService:
         # The existing CPU adapter is reused; CLI initialization cost is measured,
         # not hidden. A one-item queue bounds lag if CPU analysis exceeds nine seconds.
         birdnet = BirdNET(self.analyzer.settings.model_copy(update={"debug_audio": False}))
+        # Belongs to this session: stopping closes every open bout.
+        bouts = SoundBouts(config.sound_bout_gap_seconds * 1000, config.sound_bout_max_minutes * 60_000)
         while not self._cancel.is_set():
             try:
                 chunk = self._audio_queue.get(timeout=0.25)
@@ -549,8 +1074,10 @@ class LiveService:
                             else datetime.fromisoformat(self._state.started_at) + timedelta(milliseconds=chunk.start_ms)
                         ).date()
                         window_config = config.model_copy(update={"recording_date": heard_on})
+                    voices: list[tuple[int, int]] = []
                     events, metrics = birdnet.analyze(
-                        wav, video, session_id, window_config, taxa, self._cancel, self._message
+                        wav, video, session_id, window_config, taxa, self._cancel, self._message,
+                        voice_segments=voices,
                     )
                 for event in events:
                     event.start_ms += chunk.start_ms
@@ -562,13 +1089,21 @@ class LiveService:
                     event.captured_at = received_at.isoformat() if received_at else None
                     event.models["source_clock"] = "session receive time"
                     event.models["audio_timing"] = chunk.timing_note
+                    bouts.assign(event)
                     self.analyzer.events.append(event)
                     with self._mutex:
                         self._audio.append(event)
                 if self._evidence:
-                    self._evidence.audio(chunk, events)
+                    self._evidence.audio(
+                        chunk, events, mute=[(a + chunk.start_ms, b + chunk.start_ms) for a, b in voices],
+                    )
+                level = pcm_level_dbfs(chunk.pcm)
+                heard_at = datetime.now(UTC).isoformat(timespec="seconds")
+                self._log_sound_window(heard_at, level, metrics, len(events))
                 with self._mutex:
                     self._state.metrics.update(metrics)
+                    self._state.metrics["audio_level_dbfs"] = level
+                    self._state.metrics["audio_last_window_at"] = heard_at
                     self._state.metrics["audio_chunks_analyzed"] = (
                         int(self._state.metrics["audio_chunks_analyzed"]) + 1
                     )

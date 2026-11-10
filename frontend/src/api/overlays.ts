@@ -1,4 +1,5 @@
 import type { Box, VisualEvent } from "../types";
+import { leadingName, visualCertainty } from "./certainty";
 import { displayLabel } from "./timeline";
 import type { TaxonNameIndex } from "./names";
 
@@ -13,6 +14,25 @@ function unresolved(event: VisualEvent) {
   )
     return false;
   return event.classification.status !== "candidate";
+}
+
+/** Green for a reviewed or likely species, orange/red for probable/possible, gray otherwise. */
+function boxTone(event: VisualEvent): NonNullable<Box["tone"]> {
+  if (reviewedIdentification(event)) return "candidate";
+  if (event.review.status !== "unreviewed") return "unknown";
+  const level = visualCertainty(event);
+  return level === "likely"
+    ? "candidate"
+    : level === "probable" || level === "possible"
+      ? level
+      : "unknown";
+}
+
+/** "Unknown bird" when the group is known, otherwise "Unknown organism". */
+function unknownLabel(event: VisualEvent) {
+  if (event.review.status === "unknown") return "Unknown organism";
+  const label = event.classification.display_label || "";
+  return /^Unknown\s/i.test(label) ? label.split(" · ")[0] : "Unknown organism";
 }
 
 function geometry(box: Box["bbox_norm"]) {
@@ -70,14 +90,29 @@ function canSuppress(kept: VisualEvent, event: VisualEvent) {
   );
 }
 
+/** Nothing useful is known yet: no species, no group, or an unreviewed person/vehicle. */
+export function isUnresolved(event: VisualEvent): boolean {
+  if (event.review.status !== "unreviewed") return false;
+  const { status, broad_group } = event.classification;
+  return (
+    status === "non_wildlife" ||
+    (status === "unknown" && (broad_group || "organism") === "organism")
+  );
+}
+
 /**
  * Display-only consolidation for current and historical analyses. The
  * observation feed and stored model evidence remain complete and unchanged.
+ * Unresolved boxes are left out unless asked for.
  */
-export function selectOverlayEvents(events: VisualEvent[]): VisualEvent[] {
+export function selectOverlayEvents(
+  events: VisualEvent[],
+  showUnresolved = true,
+): VisualEvent[] {
   const ranked = events
     .filter(
       (event) =>
+        (showUnresolved || !isUnresolved(event)) &&
         event.review.status !== "false_positive" &&
         (event.classification.status !== "non_wildlife" ||
           reviewedIdentification(event)) &&
@@ -103,20 +138,22 @@ export function selectOverlayEvents(events: VisualEvent[]): VisualEvent[] {
 export function observationOverlays(
   events: VisualEvent[],
   taxa?: TaxonNameIndex,
+  options: { showUnresolved?: boolean } = {},
 ): Box[] {
   return (
-    selectOverlayEvents(events)
+    selectOverlayEvents(events, options.showUnresolved ?? true)
       .map((event): Box => {
-        const unknown = unresolved(event);
+        const tone = boxTone(event);
         return {
           bbox_norm: event.bbox_norm,
-          tone: unknown ? "unknown" : "candidate",
-          label: unknown
-            ? "Unknown organism"
-            : displayLabel(event, taxa) +
-              (event.detector.score === null
-                ? ""
-                : " · detector " + event.detector.score.toFixed(2)),
+          tone,
+          // Names only on the picture; the scores live in the side panel.
+          label:
+            tone === "unknown"
+              ? unknownLabel(event)
+              : tone === "candidate"
+                ? displayLabel(event, taxa)
+                : leadingName(event, taxa),
         };
       })
       // Quiet boxes go behind identified animals and their labels.
@@ -125,6 +162,20 @@ export function observationOverlays(
       )
   );
 }
+
+/** Green: likely · orange: probable · red: possible · gray: unknown. */
+export const BOX_COLORS: Record<NonNullable<Box["tone"]>, string> = {
+  candidate: "#b9e77a",
+  probable: "#f3b35b",
+  possible: "#f08a7e",
+  unknown: "rgba(190, 196, 198, 0.55)",
+};
+const LABEL_COLORS: Record<NonNullable<Box["tone"]>, string> = {
+  candidate: "#e3f4ce",
+  probable: "#fbe0b5",
+  possible: "#f9d2cc",
+  unknown: "#d8dddf",
+};
 
 export function drawObservationOverlays(
   ctx: CanvasRenderingContext2D,
@@ -139,7 +190,7 @@ export function drawObservationOverlays(
     const y = rect.y + y1 * rect.height;
     ctx.font = quiet ? "11px system-ui" : "13px system-ui";
     ctx.lineWidth = quiet ? 1 : 2;
-    ctx.strokeStyle = quiet ? "rgba(190, 196, 198, 0.55)" : "#b9e77a";
+    ctx.strokeStyle = BOX_COLORS[box.tone ?? "candidate"];
     ctx.strokeRect(x, y, (x2 - x1) * rect.width, (y2 - y1) * rect.height);
     const padding = quiet ? 6 : 8;
     const labelHeight = quiet ? 19 : 24;
@@ -151,7 +202,7 @@ export function drawObservationOverlays(
     const ty = Math.max(0, y - labelHeight - 2);
     ctx.fillStyle = quiet ? "rgba(38, 44, 46, 0.55)" : "#18251ee8";
     ctx.fillRect(tx, ty, textWidth, labelHeight);
-    ctx.fillStyle = quiet ? "#d8dddf" : "#e3f4ce";
+    ctx.fillStyle = LABEL_COLORS[box.tone ?? "candidate"];
     ctx.fillText(
       box.label,
       tx + padding,

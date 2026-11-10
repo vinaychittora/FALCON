@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Box, VisualEvent } from "../types";
 import {
   drawObservationOverlays,
+  isUnresolved,
   observationOverlays,
   selectOverlayEvents,
 } from "./overlays";
@@ -140,12 +141,37 @@ describe("observation overlay selection", () => {
       {
         bbox_norm: unknown.bbox_norm,
         tone: "unknown",
-        label: "Unknown organism",
+        label: "Unknown bird",
       },
     ]);
   });
 
-  it("hides false positives and retains the corrected name and candidate score", () => {
+  it("hides boxes that say nothing yet unless unresolved boxes are requested", () => {
+    const nothing = event("nothing", [0.1, 0.1, 0.2, 0.3], 0.5);
+    nothing.classification.status = "unknown";
+    nothing.classification.broad_group = "organism";
+    nothing.classification.display_label = "Unknown organism";
+    const bird = event("bird", [0.5, 0.1, 0.6, 0.3], 0.5);
+    bird.classification.status = "unknown";
+    bird.classification.broad_group = "Aves";
+    bird.classification.display_label = "Unknown bird";
+    const person = event("person", [0.7, 0.1, 0.9, 0.9], 0.9);
+    person.classification.status = "non_wildlife";
+    expect(isUnresolved(nothing) && isUnresolved(person)).toBe(true);
+    expect(isUnresolved(bird)).toBe(false);
+    expect(
+      observationOverlays([nothing, bird, person], undefined, {
+        showUnresolved: false,
+      }).map((box) => box.label),
+    ).toEqual(["Unknown bird"]);
+    expect(
+      observationOverlays([nothing, bird], undefined, {
+        showUnresolved: true,
+      }),
+    ).toHaveLength(2);
+  });
+
+  it("hides false positives and shows the corrected name without a score", () => {
     const falsePositive = harrier();
     falsePositive.review.status = "false_positive";
     const corrected = head();
@@ -155,7 +181,7 @@ describe("observation overlay selection", () => {
       {
         bbox_norm: corrected.bbox_norm,
         tone: "candidate",
-        label: "Circus macrourus · detector 0.67",
+        label: "Circus macrourus",
       },
     ]);
   });

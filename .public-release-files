@@ -23,6 +23,7 @@ backend/app/api/nodes.py
 backend/app/api/remote.py
 backend/app/api/reviews.py
 backend/app/api/sensors.py
+backend/app/api/summary.py
 backend/app/api/taxa.py
 backend/app/api/test_sessions.py
 backend/app/api/videos.py
@@ -36,6 +37,7 @@ backend/app/inference/labels.py
 backend/app/inference/megadetector.py
 backend/app/inference/motion.py
 backend/app/inference/pipeline.py
+backend/app/inference/privacy.py
 backend/app/inference/regions.py
 backend/app/inference/tracker.py
 backend/app/main.py
@@ -122,10 +124,12 @@ backend/tests/test_sensor_history.py
 backend/tests/test_server.py
 backend/tests/test_session_clock.py
 backend/tests/test_source_technical.py
+backend/tests/test_summary_api.py
 backend/tests/test_system_metrics.py
 backend/tests/test_systemd_service.py
 backend/tests/test_taxa.py
 backend/tests/test_test_sessions.py
+backend/tests/test_tracking_privacy.py
 backend/tests/test_uploads.py
 backend/tests/test_watchdog.py
 backend/tests/test_web.py
@@ -170,6 +174,8 @@ frontend/src/App.test.tsx
 frontend/src/App.tsx
 frontend/src/api/analysis.test.ts
 frontend/src/api/analysis.ts
+frontend/src/api/certainty.test.ts
+frontend/src/api/certainty.ts
 frontend/src/api/client.ts
 frontend/src/api/deviceAccess.test.ts
 frontend/src/api/deviceAccess.ts
@@ -182,8 +188,6 @@ frontend/src/api/exports.ts
 frontend/src/api/format.ts
 frontend/src/api/initialLoad.test.ts
 frontend/src/api/initialLoad.ts
-frontend/src/api/install.test.ts
-frontend/src/api/install.ts
 frontend/src/api/liveSystem.test.ts
 frontend/src/api/liveSystem.ts
 frontend/src/api/media.test.ts
@@ -197,6 +201,7 @@ frontend/src/api/overlays.test.ts
 frontend/src/api/overlays.ts
 frontend/src/api/search.test.ts
 frontend/src/api/search.ts
+frontend/src/api/summary.ts
 frontend/src/api/taxa.ts
 frontend/src/api/testSessions.test.ts
 frontend/src/api/testSessions.ts
@@ -221,7 +226,6 @@ frontend/src/components/Icon.tsx
 frontend/src/components/ImagePlayer.tsx
 frontend/src/components/Inspector.test.tsx
 frontend/src/components/Inspector.tsx
-frontend/src/components/InstallApp.tsx
 frontend/src/components/LiveCamera.test.ts
 frontend/src/components/LiveCamera.tsx
 frontend/src/components/LiveSystem.test.tsx
@@ -262,11 +266,14 @@ frontend/src/pages/LivePage.tsx
 frontend/src/pages/MediaTestsPage.tsx
 frontend/src/pages/ReviewPage.tsx
 frontend/src/pages/SensorsPage.tsx
+frontend/src/pages/SummaryPage.test.tsx
+frontend/src/pages/SummaryPage.tsx
 frontend/src/pages/Taxa.tsx
 frontend/src/pages/help.css
 frontend/src/style.css
 frontend/src/types/index.ts
 frontend/src/ui/CameraControls.tsx
+frontend/src/ui/CertaintyLegend.tsx
 frontend/src/ui/EncounterCard.tsx
 frontend/src/ui/Pill.tsx
 frontend/src/ui/SpeciesPicker.tsx

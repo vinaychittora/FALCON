@@ -106,6 +106,7 @@ class BioCLIP:
         if self.text is None:
             raise RuntimeError("Candidate text embeddings have not been prepared")
         results = []
+        embeddings = []
         with torch.inference_mode():
             # Batch of one bounds memory on an 8 GB GPU; classifier calls are track-limited.
             for crop in crops:
@@ -114,6 +115,9 @@ class BioCLIP:
                     tensor = tensor.half()
                 features = self.model.encode_image(tensor, normalize=True).float()
                 results.append((features @ self.text.T).cpu().numpy())
+                embeddings.append(features[0].cpu().numpy())
+        # The image embeddings of the last call, for the evidence log (re-grading later).
+        self.last_features = embeddings
         return np.concatenate(results).astype(np.float32)
 
 

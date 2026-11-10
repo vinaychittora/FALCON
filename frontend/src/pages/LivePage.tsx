@@ -1,11 +1,15 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFullscreen } from "../components/fullscreen";
+import DetectionBell from "../ui/DetectionBell";
+import LiveListen from "../ui/LiveListen";
+import { sensorHref } from "./SensorSettings";
 import { api } from "../api/client";
 import {
   fetchEncounters,
   liveSourceId,
-  reviewEncounters,
   type Encounter,
 } from "../api/encounters";
+import { fetchSummary } from "../api/summary";
 import { wetness } from "../api/environment";
 import { formatAgo, formatElapsed } from "../api/format";
 import {
@@ -15,7 +19,9 @@ import {
   nodeComponent,
   nodeWarnings,
   observeNode,
+  slowedByHeat,
   streamState,
+  thermalNotice,
   type ComponentName,
   type SensorNode,
 } from "../api/nodes";
@@ -27,18 +33,15 @@ import {
   type CameraProfile,
 } from "../components/LiveCamera";
 import { usePoll } from "../hooks/usePoll";
+import { usePersistentState } from "../hooks/usePersistentState";
 import type { Config, EnvironmentReading, LiveState } from "../types";
-import CameraControls from "../ui/CameraControls";
-import EncounterCard, { type DecisionHandler } from "../ui/EncounterCard";
+import FeedRow from "../ui/FeedRow";
+import { setDetectionPaused } from "../ui/PauseDetection";
+import { splitLiveFeed } from "../api/liveFeed";
 import Pill, { type Tone } from "../ui/Pill";
 import type { Taxon } from "./Taxa";
 
 const ACTIVE = ["connecting", "live", "reconnecting", "stopping"];
-const MODEL_NAMES: Record<string, string> = {
-  bioclip_2: "BioCLIP 2",
-  bioclip_2_5: "BioCLIP 2.5",
-  ensemble: "BioCLIP 2 + 2.5",
-};
 
 export function liveStatus(state: LiveState | null): {
   label: string;
@@ -110,14 +113,69 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function number(value: unknown, digits = 1, unit = ""): string {
-  return typeof value === "number" && Number.isFinite(value) && value > 0
+/** Dot colour for the Live bar's sound indicator: off, working or a problem. */
+export function soundTone(
+  active: boolean,
+  status: string | null | undefined,
+  stalledSince?: unknown,
+): "off" | "good" | "bad" {
+  if (!active || !status || status === "disabled") return "off";
+  if (typeof stalledSince === "string" && stalledSince) return "bad";
+  return /fail|error|unavailable|no audio|retrying/i.test(status)
+    ? "bad"
+    : "good";
+}
+
+/** "stalled since 08:40" when no sound has reached FALCON for a while, else "". */
+export function soundStall(stalledSince: unknown): string {
+  if (typeof stalledSince !== "string" || !stalledSince) return "";
+  const time = new Date(stalledSince);
+  return Number.isFinite(time.valueOf())
+    ? `no sound since ${time.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false })}`
+    : "no sound";
+}
+
+/** "11:38:12 · 15 fps · 1280×1024": the time, measured frame rate and picture size. */
+export function stageInfo(now: Date, metrics: Record<string, unknown>): string {
+  const time = now.toLocaleTimeString("en-GB", { hour12: false });
+  const fps = Number(metrics.received_video_fps);
+  const width = Number(metrics.width);
+  const height = Number(metrics.height);
+  return [
+    time,
+    Number.isFinite(fps) && fps > 0 ? `${Math.round(fps)} fps` : "– fps",
+    width > 0 && height > 0 ? `${width}×${height}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+/** The corner overlay on the Live picture; ticks every second, never changes width. */
+function StageInfo({ metrics }: { metrics: Record<string, unknown> }) {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <span className="stage-info" aria-hidden="true">
+      {stageInfo(now, metrics)}
+    </span>
+  );
+}
+
+/** A sensor reading, including zero and below (air temperature in winter). */
+function reading(
+  value: number | null | undefined,
+  digits: number,
+  unit: string,
+): string {
+  return typeof value === "number" && Number.isFinite(value)
     ? `${value.toFixed(digits)}${unit}`
     : "—";
 }
 
 export default function LivePage({
-  taxa,
   onOpen,
   onNavigate,
 }: {
@@ -132,9 +190,29 @@ export default function LivePage({
     () => api<EnvironmentReading>("/sensors/current"),
     15000,
   );
-  const [choice, setChoice] = useState("");
-  const [overlays, setOverlays] = useState(true);
-  const [feedFilter, setFeedFilter] = useState<"all" | "unreviewed">("all");
+  // The source choice and the Live bar switches are remembered in this browser, so
+  // they keep their position across pages, reloads and FALCON restarts.
+  const [choice, setChoice] = usePersistentState<string>("live.source", "");
+  const [overlays, setOverlays] = usePersistentState<boolean>(
+    "live.boxes",
+    true,
+  );
+  const [infoOverlay, setInfoOverlay] = usePersistentState<boolean>(
+    "live.overlay",
+    true,
+  );
+  const stage = useRef<HTMLElement>(null);
+  const fullscreen = useFullscreen(stage);
+  const [showUnresolved, setShowUnresolved] = usePersistentState<boolean>(
+    "live.unresolved",
+    false,
+  );
+  const [savedFilter, setFeedFilter] = usePersistentState<string>(
+    "live.feed",
+    "all",
+  );
+  const feedFilter: "all" | "unreviewed" =
+    savedFilter === "unreviewed" ? "unreviewed" : "all";
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const state = live.data;
@@ -154,20 +232,36 @@ export default function LivePage({
   const selected = sources.find((source) => source.key === selectedKey);
   const controlNode = observing ?? selected?.node;
   const sessionSource = active ? liveSourceId(state?.session_id) : undefined;
+  // Newest visit on top and no reordering while an animal lingers; visits that
+  // say nothing yet (no species, no group) stay hidden unless asked for.
   const feed = usePoll(
     () =>
       fetchEncounters({
         scope: "live",
         source_id: sessionSource,
         review_status: feedFilter === "unreviewed" ? "unreviewed" : undefined,
-        limit: 24,
+        resolved_only: !showUnresolved,
+        order: "first_seen",
+        limit: 80,
       }),
     active ? 3000 : 20000,
-    `${sessionSource ?? "recent"}-${feedFilter}`,
+    `${sessionSource ?? "recent"}-${feedFilter}-${showUnresolved}`,
+  );
+  const counts = usePoll(
+    () => fetchSummary({ scope: "live", source_id: sessionSource }),
+    active ? 10000 : 60000,
+    sessionSource ?? "recent",
   );
   const status = liveStatus(state);
   const metrics = state?.metrics ?? {};
   const audioOnly = Number(metrics.audio_only) === 1;
+  // The sensor node pauses its stream itself when it gets too hot.
+  const nodeStatus = controlNode?.online ? controlNode.status : null;
+  const heat = thermalNotice(
+    nodeStatus?.thermal,
+    nodeStatus?.system.cpu_temperature_c,
+  );
+  const slowed = !heat && slowedByHeat(nodeStatus?.system.power);
 
   async function start() {
     if (!selected) return;
@@ -210,11 +304,6 @@ export default function LivePage({
     }
   }
 
-  const decide: DecisionHandler = async (encounter, next, taxonId) => {
-    await reviewEncounters([encounter.encounter_id], next, { taxonId });
-    feed.refresh();
-  };
-
   async function toggle(
     node: SensorNode,
     component: ComponentName,
@@ -229,10 +318,11 @@ export default function LivePage({
     }
   }
 
-  const encounters = feed.data?.encounters ?? [];
-  const unreviewed = encounters.filter(
-    (item) => item.review_status === "unreviewed",
-  ).length;
+  // Only confirmed and likely visits are listed; the rest wait on the Review page.
+  const { shown, toReview } = splitLiveFeed(
+    feed.data?.encounters ?? [],
+    showUnresolved,
+  );
   return (
     <div className="page live-page">
       <header className="page-header">
@@ -301,6 +391,21 @@ export default function LivePage({
           {error || state?.error}
         </p>
       )}
+      {state?.detection_paused_since && (
+        <p className="banner banner-warn" role="status">
+          Detection paused for camera work: nothing is detected, recorded or
+          rung.{" "}
+          <button
+            type="button"
+            className="text-button"
+            onClick={() =>
+              void setDetectionPaused(false).then(() => live.refresh())
+            }
+          >
+            Resume
+          </button>
+        </p>
+      )}
       {active && evidenceRecordingIssue(metrics) && (
         <p className="banner banner-warn" role="alert">
           Clips are not being saved: {evidenceRecordingIssue(metrics)}{" "}
@@ -321,12 +426,22 @@ export default function LivePage({
         </section>
       )}
       <div className="live-grid">
-        <section className="card live-stage" aria-label="Live view">
+        <section
+          className={`card live-stage${fullscreen.active ? " is-fullscreen" : ""}`}
+          aria-label="Live view"
+          ref={stage}
+        >
           {active &&
           state &&
           state.preview_timestamp_ms !== null &&
           !audioOnly ? (
-            <LivePreview state={state} show={overlays} />
+            <LivePreview
+              state={state}
+              show={overlays}
+              showUnresolved={showUnresolved}
+            >
+              {infoOverlay && <StageInfo metrics={state.metrics} />}
+            </LivePreview>
           ) : (
             <div className="stage-placeholder">
               <Icon
@@ -334,15 +449,17 @@ export default function LivePage({
                 size={40}
               />
               <h2>
-                {audioOnly
-                  ? "Listening (this source has no camera)"
-                  : active
-                    ? state?.status === "reconnecting"
-                      ? "Reconnecting to the stream…"
-                      : "Opening the stream…"
-                    : selected
-                      ? `Ready: ${selected.label}`
-                      : "No source selected"}
+                {heat && active
+                  ? heat
+                  : audioOnly
+                    ? "Listening (this source has no camera)"
+                    : active
+                      ? state?.status === "reconnecting"
+                        ? "Reconnecting to the stream…"
+                        : "Opening the stream…"
+                      : selected
+                        ? `Ready: ${selected.label}`
+                        : "No source selected"}
               </h2>
               <p>
                 {audioOnly
@@ -364,49 +481,110 @@ export default function LivePage({
               />
               <span>Detection boxes</span>
             </label>
-            <span className="muted">
-              {active
-                ? `Sound: ${String(state?.audio_status ?? "waiting").replaceAll("_", " ")}`
-                : "Idle"}
+            <label
+              className="switch-row"
+              title="Time, frame rate and picture size in the corner of the video"
+            >
+              <input
+                type="checkbox"
+                role="switch"
+                checked={infoOverlay}
+                onChange={(change) => setInfoOverlay(change.target.checked)}
+              />
+              <span>Overlay</span>
+            </label>
+            <label
+              className="switch-row"
+              title="Also show boxes and cards for detections with no species and no group yet"
+            >
+              <input
+                type="checkbox"
+                role="switch"
+                checked={showUnresolved}
+                onChange={(change) => setShowUnresolved(change.target.checked)}
+              />
+              <span>Show unresolved</span>
+            </label>
+            {/* Fixed-width sound indicator; the full wording is in the tooltip and on
+                System → Live status, so the bar never changes width. */}
+            <span
+              className={`sound-indicator tone-${soundTone(active, state?.audio_status, metrics.audio_stalled_since)}`}
+              title={`Sound: ${
+                !active
+                  ? "not observing"
+                  : soundStall(metrics.audio_stalled_since) ||
+                    String(state?.audio_status ?? "waiting").replaceAll(
+                      "_",
+                      " ",
+                    )
+              }`}
+            >
+              <Icon name="sound" size={15} />
+              <i aria-hidden="true" />
+              Sound
             </span>
-          </div>
-          {active && (
-            <div className="facts">
-              <Fact
-                label="Video"
-                value={`${number(metrics.received_video_fps, 1, " fps")} · ${metrics.width && metrics.height ? `${metrics.width}×${metrics.height}` : "—"}`}
-              />
-              <Fact
-                label="Analysis"
-                value={`${number(metrics.sample_fps, 1, " fps")} · lag ${number(Number(metrics.inference_lag_ms) / 1000, 1, " s")}`}
-              />
-              <Fact
-                label="Model"
-                value={`${MODEL_NAMES[String(metrics.classifier_mode)] ?? "—"} · ${String(metrics.device ?? "—").toUpperCase()}`}
-              />
-              <Fact
-                label="Sound"
-                value={`${String(metrics.audio_codec ?? "—")} · ${number(Number(metrics.audio_sample_rate) / 1000, 1, " kHz")}`}
-              />
-              <Fact
-                label="Clips saved"
-                value={String(
-                  Number(metrics.evidence_ready_clips ?? 0) +
-                    Number(metrics.audio_clips_saved ?? 0),
-                )}
-              />
-              <Fact
-                label="Clock"
-                value={
-                  metrics.clock_synchronized === "yes"
-                    ? "Synchronized"
-                    : metrics.clock_synchronized === "no"
-                      ? "Not synchronized"
-                      : "—"
+            <LiveListen
+              available={active && state?.audio_status !== "disabled" && !heat}
+            />
+            <DetectionBell
+              encounters={feed.data ? shown : null}
+              resetKey={`${sessionSource ?? "recent"}-${feedFilter}-${showUnresolved}`}
+            />
+            {fullscreen.supported && (
+              <button
+                type="button"
+                className="fullscreen-button"
+                onClick={fullscreen.toggle}
+                aria-pressed={fullscreen.active}
+                aria-label={
+                  fullscreen.active ? "Exit full screen" : "Full screen"
                 }
-              />
-            </div>
-          )}
+                title={
+                  fullscreen.active
+                    ? "Exit full screen (Esc)"
+                    : "Full screen (F). Esc leaves full screen."
+                }
+              >
+                <Icon name={fullscreen.active ? "close" : "focus"} size={16} />
+              </button>
+            )}
+          </div>
+          {/* Conditions at the sensor. Technical details (frame rate, model, clips,
+              clock) are on System → Live status. */}
+          <div className="facts">
+            <Fact
+              label="Air temperature"
+              value={reading(environment.data?.temperature_c, 1, " °C")}
+            />
+            <Fact
+              label="Humidity"
+              value={reading(environment.data?.humidity_percent, 0, " %")}
+            />
+            <Fact
+              label="Pressure"
+              value={reading(environment.data?.pressure_hpa, 1, " hPa")}
+            />
+            <Fact
+              label="Rain plate"
+              value={wetness(environment.data?.surface_wet)}
+            />
+            <Fact
+              label="Node CPU"
+              value={reading(nodeStatus?.system.cpu_temperature_c, 0, " °C")}
+            />
+            <Fact
+              label="Heat protection"
+              value={
+                heat
+                  ? "Paused (too hot)"
+                  : slowed
+                    ? "Slowed by heat"
+                    : nodeStatus?.thermal
+                      ? "Normal"
+                      : "—"
+              }
+            />
+          </div>
         </section>
         <aside className="card live-feed" aria-label="Recent detections">
           <div className="card-header">
@@ -416,9 +594,9 @@ export default function LivePage({
               </h2>
               <p className="muted">
                 {feed.data
-                  ? `${feed.data.total} encounter${feed.data.total === 1 ? "" : "s"}`
+                  ? `${feed.data.total} visit${feed.data.total === 1 ? "" : "s"}`
                   : "Loading…"}
-                {unreviewed ? ` · ${unreviewed} to review` : ""}
+                {counts.data ? ` · ${counts.data.species_count} species` : ""}
               </p>
             </div>
             <div className="segmented" role="group" aria-label="Show">
@@ -436,40 +614,43 @@ export default function LivePage({
               </button>
             </div>
           </div>
-          <p className="feed-help">
-            One card per animal visit. <kbd>C</kbd> confirm · <kbd>E</kbd>{" "}
-            correct · <kbd>U</kbd> unsure · <kbd>X</kbd> not an animal ·{" "}
-            <kbd>D</kbd> discard
-          </p>
-          <div className="feed-list">
-            {encounters.map((encounter) => (
-              <EncounterCard
+          <div className="feed-list compact">
+            {shown.map((encounter) => (
+              <FeedRow
                 key={encounter.encounter_id}
                 encounter={encounter}
-                taxa={taxa}
-                onDecision={decide}
                 onOpen={onOpen}
-                compact
               />
             ))}
-            {feed.data && !encounters.length && (
+            {feed.data && !shown.length && (
               <div className="feed-empty">
                 <Icon name="leaf" size={28} />
                 <p>
-                  {active
-                    ? "No animals detected yet in this session."
-                    : "No detections yet."}
+                  {toReview
+                    ? "Nothing certain yet. Uncertain visits wait in Review."
+                    : active
+                      ? "No animals detected yet in this session."
+                      : "No detections yet."}
                 </p>
               </div>
             )}
             {feed.error && <p className="error">{feed.error}</p>}
           </div>
-          <button
-            className="text-button feed-more"
-            onClick={() => onNavigate("review")}
-          >
-            Open the full review <Icon name="arrow" size={15} />
-          </button>
+          <div className="feed-links">
+            <button
+              className="text-button feed-more"
+              onClick={() => onNavigate("review")}
+            >
+              {toReview ? `${toReview} more to review` : "Open the full review"}{" "}
+              <Icon name="arrow" size={15} />
+            </button>
+            <button
+              className="text-button feed-more"
+              onClick={() => onNavigate("summary")}
+            >
+              Counts and sessions <Icon name="arrow" size={15} />
+            </button>
+          </div>
         </aside>
       </div>
       <div className="live-lower">
@@ -489,12 +670,22 @@ export default function LivePage({
                     : `Offline · last seen ${formatAgo(controlNode.last_seen)}`}
                 </p>
               </div>
-              <button
-                className="text-button"
-                onClick={() => onNavigate("sensors")}
-              >
-                All node settings <Icon name="arrow" size={15} />
-              </button>
+              <span className="sensor-links">
+                {controlNode.status?.components.camera.present && (
+                  <a
+                    className="text-button"
+                    href={sensorHref(controlNode.node_id, "camera")}
+                  >
+                    Camera settings
+                  </a>
+                )}
+                <button
+                  className="text-button"
+                  onClick={() => onNavigate("sensors")}
+                >
+                  All node settings <Icon name="arrow" size={15} />
+                </button>
+              </span>
             </div>
             {nodeWarnings(controlNode.status).map((warning) => (
               <p className="banner banner-warn" key={warning}>
@@ -536,77 +727,8 @@ export default function LivePage({
                 )}
               </div>
             )}
-            {controlNode.online &&
-              controlNode.status?.components.camera.present && (
-                <details className="quick-camera">
-                  <summary>
-                    Camera picture: focus, brightness, white balance
-                  </summary>
-                  <CameraControls
-                    node={controlNode}
-                    quick
-                    onChanged={() => nodes.refresh()}
-                  />
-                </details>
-              )}
           </section>
         )}
-        <section
-          className="card environment"
-          aria-label="Weather at the sensor"
-        >
-          <div className="card-header">
-            <div>
-              <h2>
-                <Icon name="sun" size={18} /> Weather at the sensor
-              </h2>
-              <p className="muted">
-                {environment.data?.status === "fresh"
-                  ? `Measured ${formatAgo(environment.data.observed_at)}${environment.data.sensor_id ? ` · ${environment.data.sensor_id}` : ""}`
-                  : environment.data?.status === "stale"
-                    ? `Last reading ${formatAgo(environment.data.observed_at)} (stale)`
-                    : environment.data?.status === "unavailable"
-                      ? "No usable reading"
-                      : "No weather sensor connected"}
-              </p>
-            </div>
-          </div>
-          <dl className="weather">
-            <div>
-              <dt>
-                <Icon name="thermometer" size={16} /> Temperature
-              </dt>
-              <dd>
-                {environment.data?.temperature_c?.toFixed(1) ?? "—"}{" "}
-                <small>°C</small>
-              </dd>
-            </div>
-            <div>
-              <dt>
-                <Icon name="drop" size={16} /> Humidity
-              </dt>
-              <dd>
-                {environment.data?.humidity_percent?.toFixed(0) ?? "—"}{" "}
-                <small>%</small>
-              </dd>
-            </div>
-            <div>
-              <dt>
-                <Icon name="wind" size={16} /> Pressure
-              </dt>
-              <dd>
-                {environment.data?.pressure_hpa?.toFixed(1) ?? "—"}{" "}
-                <small>hPa</small>
-              </dd>
-            </div>
-            <div>
-              <dt>
-                <Icon name="rain" size={16} /> Rain plate
-              </dt>
-              <dd>{wetness(environment.data?.surface_wet)}</dd>
-            </div>
-          </dl>
-        </section>
       </div>
     </div>
   );

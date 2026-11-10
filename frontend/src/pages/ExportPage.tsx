@@ -16,6 +16,7 @@ import {
   toLocalInput,
 } from "../api/format";
 import Icon from "../components/Icon";
+import { hashQuery } from "../api/summary";
 import { HelpLink } from "./HelpPage";
 import { usePoll } from "../hooks/usePoll";
 import type { Config } from "../types";
@@ -55,12 +56,18 @@ const INITIAL: ExportForm = {
 };
 
 export default function ExportPage() {
+  // "#/export?source=…" preselects one session (from the Summary page) over all time.
+  const requested =
+    typeof window === "undefined"
+      ? ""
+      : hashQuery(window.location.hash, "source");
   const [form, setForm] = useState<ExportForm>(() => ({
     ...INITIAL,
     ...savedDetails(),
-    ...presetWindow("7d"),
+    ...presetWindow(requested ? "all" : "7d"),
+    ...(requested ? { source_id: requested } : {}),
   }));
-  const [preset, setPreset] = useState<Preset>("7d");
+  const [preset, setPreset] = useState<Preset>(requested ? "all" : "7d");
   const [from, setFrom] = useState(() =>
     toLocalInput(new Date(Date.now() - 7 * 86400_000)),
   );

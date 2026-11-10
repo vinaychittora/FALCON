@@ -86,8 +86,9 @@ vector (`node/tests`, `backend/tests/test_nodes.py`).
 
 Main API groups: `/api/live` (state, start, stop, preview, IP camera profile),
 `/api/nodes` (pair, list, control, observe), `/api/detections` (records, encounters, review,
-bulk review, thumbnails), `/api/exports` (preview, Camtrap DP), `/api/evidence` (clips,
-complete archive), `/api/sensors` (current, history, local push), `/api/config`,
+bulk review, thumbnails), `/api/summary` and `/api/sessions` (visits per species and per
+group in a period; one row per observation session), `/api/exports` (preview, Camtrap DP),
+`/api/evidence` (clips, complete archive), `/api/sensors` (current, history, local push), `/api/config`,
 `/api/taxa`, `/api/appliance`, `/api/remote`, `/api/system`, `/api/help` (guides rendered from
 `docs/`, search, handbook files). Interactive documentation is at
 `/docs` on the running server.

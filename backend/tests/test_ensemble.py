@@ -97,7 +97,11 @@ def test_track_averages_each_model_independently_and_expires_all_evidence() -> N
     np.testing.assert_allclose(track.model_scores()["bioclip_2"], [0.5, 0.2])
     np.testing.assert_allclose(track.model_scores()["bioclip_2_5"], [0.7, 0.1])
     track.expire_evidence(5000)
-    assert track.model_scores() == {} and track.count == 0
+    # Each model's average continues as one prior crop; the crop budget restarts.
+    assert track.count == 0 and track.model_score_counts == {"bioclip_2": 1, "bioclip_2_5": 1}
+    np.testing.assert_allclose(track.model_scores()["bioclip_2"], [0.5, 0.2])
+    track.add_model_scores({"bioclip_2": scores([0.1, 0.9]), "bioclip_2_5": scores([0.1, 0.9])}, 10, 5000)
+    np.testing.assert_allclose(track.model_scores()["bioclip_2"], [0.3, 0.55])
 
 
 def test_embedding_cache_is_model_specific() -> None:

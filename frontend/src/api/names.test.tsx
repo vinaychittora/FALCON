@@ -100,7 +100,7 @@ describe("reviewed common and scientific names", () => {
         <AudioCards events={[oldCorrection]} onInspect={() => {}} />
       </TaxonNamesContext.Provider>,
     );
-    expect(card).toContain("<h4>Indian Pitta</h4>");
+    expect(card).toMatch(/<h4[^>]*>Indian Pitta<\/h4>/);
     expect(card).toContain("<em>Pitta brachyura</em>");
     expect(card.match(/Pitta brachyura/g)).toHaveLength(1);
     const history = renderToStaticMarkup(
@@ -124,7 +124,7 @@ describe("reviewed common and scientific names", () => {
     const card = renderToStaticMarkup(
       <AudioCards events={[oldCorrection]} onInspect={() => {}} />,
     );
-    expect(card).toContain("<h4>Pitta brachyura</h4>");
+    expect(card).toMatch(/<h4[^>]*>Pitta brachyura<\/h4>/);
     expect(card.match(/Pitta brachyura/g)).toHaveLength(1);
   });
 
@@ -149,9 +149,7 @@ describe("reviewed common and scientific names", () => {
       detector: { score: 0.8 },
       classification: { status: "unknown", top_k: [] },
     } as unknown as VisualEvent;
-    expect(observationOverlays([event], names)[0].label).toBe(
-      "Indian Pitta · detector 0.80",
-    );
+    expect(observationOverlays([event], names)[0].label).toBe("Indian Pitta");
     const html = renderToStaticMarkup(
       <TaxonNamesContext.Provider value={names}>
         <Inspector
@@ -163,7 +161,7 @@ describe("reviewed common and scientific names", () => {
       </TaxonNamesContext.Provider>,
     );
     expect(html).toMatch(/<h3[^>]*>Indian Pitta<\/h3>/);
-    expect(html).toContain("Model identification");
+    expect(html).toContain("model said");
     expect(html).toContain("Indian Robin");
   });
 });

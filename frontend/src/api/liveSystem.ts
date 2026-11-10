@@ -8,6 +8,8 @@ export interface SystemMetrics {
   refresh_interval_seconds: number;
   scope: "linux" | "wsl" | "windows" | "other";
   scope_label: string;
+  /** Linux clock source; "tsc" under WSL was measured running 10 % fast. */
+  clocksource?: string | null;
   cpu: {
     percent: number | null;
     logical_count: number | null;

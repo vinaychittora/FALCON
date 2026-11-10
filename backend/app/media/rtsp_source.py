@@ -1,5 +1,7 @@
 """RTSP capture with independent preview, audio, and bounded in-memory mailboxes."""
 
+import logging
+import queue
 import threading
 import time
 from collections import deque
@@ -13,7 +15,19 @@ import numpy as np
 
 from app.media.audio_clock import AudioReceiveClock
 from app.media.base import Frame
+from app.media.crop import crop_rgb
 from app.media.evidence_recorder import EvidenceRecorder
+from app.media.night import NightPicture
+
+# Decoded audio frames held for one live listener (about 4 s); older ones are dropped.
+LISTEN_BUFFER_CHUNKS = 200
+
+
+log = logging.getLogger(__name__)
+
+
+class GeometryChanged(Exception):
+    """The picture size changed mid-stream; reconnect so the decoder starts fresh."""
 
 
 @dataclass(frozen=True)
@@ -48,8 +62,16 @@ class RTSPSource:
         audio_enabled: bool = True,
         open_container: Callable[..., Any] = av.open,
         recorder: EvidenceRecorder | None = None,
+        night: NightPicture | None = None,
+        crop: tuple[float, float] = (0.0, 0.0),
+        audio_url: str | None = None,
     ):
         self._url = url
+        self._audio_url = audio_url
+        # Percent cut off the left and right of every picture (and of the clips).
+        self.crop = crop
+        # Night picture applied on the PC (pass-through nodes); None leaves frames as sent.
+        self.night = night
         self.cancel, self.started = cancel, started
         self.preview, self.audio = preview, audio
         self.status, self.audio_status = status, audio_status
@@ -66,7 +88,13 @@ class RTSPSource:
         self.reconnects = 0
         # A microphone-only source (a sensor node without a camera) has no video stream.
         self.audio_only = False
+        # While sound-only, how often to check whether the camera has come back.
+        self.video_recheck_seconds = 5.0
         self.audio_reconnects = 0
+        # Live listening in the web UI: decoded 48 kHz mono PCM handed to whoever is
+        # listening right now. Memory only, a few seconds at most; nothing is stored.
+        self._listeners: list[queue.Queue[bytes]] = []
+        self._listeners_lock = threading.Lock()
         self.audio_transport_mode = "audio-only"
         self.audio_stage = "waiting for connection"
         self.audio_codec = "unknown"
@@ -76,6 +104,32 @@ class RTSPSource:
         self._technical: dict[str, str | int | float] = {}
         self._video_packets: deque[tuple[float, int]] = deque(maxlen=2000)
         self._video_frames: deque[float] = deque(maxlen=2000)
+
+    def listen(self) -> "queue.Queue[bytes]":
+        """Subscribe to the live sound (48 kHz, mono, signed 16-bit little-endian)."""
+        mailbox: queue.Queue[bytes] = queue.Queue(maxsize=LISTEN_BUFFER_CHUNKS)
+        with self._listeners_lock:
+            self._listeners.append(mailbox)
+        return mailbox
+
+    def stop_listening(self, mailbox: "queue.Queue[bytes]") -> None:
+        with self._listeners_lock:
+            if mailbox in self._listeners:
+                self._listeners.remove(mailbox)
+
+    def _hear(self, samples: bytes) -> None:
+        with self._listeners_lock:
+            listeners = list(self._listeners)
+        for mailbox in listeners:
+            try:
+                mailbox.put_nowait(samples)
+            except queue.Full:
+                # A slow listener drops its oldest sound rather than lagging behind.
+                try:
+                    mailbox.get_nowait()
+                    mailbox.put_nowait(samples)
+                except (queue.Empty, queue.Full):
+                    pass
 
     def technical_metrics(self) -> dict[str, str | int | float]:
         """Measured video payload bitrate excludes transport overhead and camera audio."""
@@ -199,8 +253,10 @@ class RTSPSource:
         return max(0, round((time.monotonic() - self.started) * 1000))
 
     def _open(self, media: str) -> Any:
+        # Sound may come from another stream (a node's microphone with an IP camera).
+        url = self._audio_url if media in {"audio", "video+audio"} and self._audio_url else self._url
         return self.open_container(
-            self._url,
+            url,
             mode="r",
             options={
                 "rtsp_transport": "tcp",
@@ -220,13 +276,33 @@ class RTSPSource:
         except Exception:
             return False
 
-    def _run_audio_only(self) -> None:
-        """A microphone-only source: sound keeps its own subscription and reconnection loop."""
+    def _stream_has_video(self) -> bool:
+        try:
+            with self.open_container(
+                self._url, mode="r", options={"rtsp_transport": "tcp", "rw_timeout": "5000000"},
+                timeout=(5.0, 5.0),
+            ) as container:
+                return bool(container.streams.video)
+        except Exception:
+            return False
+
+    def _run_audio_only(self) -> bool:
+        """A microphone-only source: sound keeps its own subscription and reconnection loop.
+
+        A sensor node publishes sound alone for a few seconds while its camera restarts,
+        so keep checking: returns True when the stream carries video again.
+        """
         with self.condition:
             self.audio_only = True
             self.condition.notify_all()
         self.status("live", None)
-        self.cancel.wait()
+        while not self.cancel.wait(self.video_recheck_seconds):
+            if self._stream_has_video():
+                with self.condition:
+                    self.audio_only = False
+                    self.condition.notify_all()
+                return True
+        return False
 
     def run(self) -> None:
         failures = 0
@@ -253,13 +329,15 @@ class RTSPSource:
                     except Exception:
                         # RTSP servers refuse a video-only setup when the stream has no video.
                         if self.audio_enabled and self._audio_only_stream():
-                            self._run_audio_only()
+                            if self._run_audio_only():
+                                continue
                             return
                         raise
                     with container:
                         if not container.streams.video:
                             if self.audio_enabled:
-                                self._run_audio_only()
+                                if self._run_audio_only():
+                                    continue
                                 return
                             self.status("failed", "The camera did not provide a video stream")
                             self.cancel.set()
@@ -270,6 +348,7 @@ class RTSPSource:
                         video.thread_count = 4
                         video.thread_type = "AUTO"
                         next_preview = 0.0
+                        geometry: tuple[int, int] | None = None
                         for packet in container.demux(video):
                             if self.cancel.is_set():
                                 return
@@ -278,16 +357,34 @@ class RTSPSource:
                             for decoded in packet.decode():
                                 if not isinstance(decoded, av.VideoFrame):
                                     continue
+                                size = (decoded.width, decoded.height)
+                                if geometry is None:
+                                    geometry = size
+                                elif size != geometry:
+                                    # The camera mode changed under a running decoder (the
+                                    # torn 1080p picture of 8 Nov): reconnect for a fresh one.
+                                    log.warning(
+                                        "stream geometry changed %dx%d -> %dx%d, decoder reset",
+                                        *geometry, *size,
+                                    )
+                                    raise GeometryChanged()
                                 self.decoded_frames += 1
                                 now = time.monotonic()
                                 self._record_video_frame(now)
                                 if now < next_preview:
                                     continue
                                 next_preview = now + 0.2
+                                rgb = np.asarray(decoded.to_ndarray(format="rgb24"), dtype=np.uint8)
+                                grey = False
+                                if self.night is not None:
+                                    rgb, grey = self.night.apply(rgb)
+                                rgb = crop_rgb(rgb, *self.crop)
                                 frame = Frame(
                                     self.elapsed_ms(),
-                                    np.asarray(decoded.to_ndarray(format="rgb24"), dtype=np.uint8),
+                                    rgb,
                                     datetime.now(UTC),
+                                    greyscale=grey,
+                                    crop=self.crop,
                                     recording_generation=generation,
                                     recording_timestamp_s=(
                                         float(decoded.pts * decoded.time_base)
@@ -330,6 +427,7 @@ class RTSPSource:
             if audio_worker:
                 audio_worker.join()
             self._url = ""
+            self._audio_url = None
             av.logging.restore_default_callback()
             av.logging.set_libav_level(av.logging.ERROR)
             with self.condition:
@@ -361,6 +459,7 @@ class RTSPSource:
                     pcm = bytearray()
                     audio_origin: int | None = None
                     samples_emitted = 0
+                    window_end_ms = 0
                     self.audio_clock.begin_connection()
                     for packet in container.demux(container.streams.audio[0]):
                         if self.cancel.is_set():
@@ -406,12 +505,23 @@ class RTSPSource:
                             # jumps. Receive/sample coverage above controls resets.
                             decoded.pts = None
                             for converted in resampler.resample(decoded):
-                                pcm.extend(converted.to_ndarray().tobytes())
+                                samples = converted.to_ndarray().tobytes()
+                                pcm.extend(samples)
+                                self._hear(samples)
                             size = 48000 * 2 * 9
                             while len(pcm) >= size:
+                                # Window start from receive time: the buffered audio ends
+                                # now. Counting samples alone drifts by minutes per hour
+                                # when the source delivers fewer samples than declared.
+                                # Windows never overlap or start before the connection.
+                                start_ms = max(
+                                    audio_origin if samples_emitted == 0 else window_end_ms,
+                                    self.elapsed_ms() - round(len(pcm) / 96),
+                                )
+                                window_end_ms = start_ms + 9000
                                 self.audio(
                                     AudioChunk(
-                                        audio_origin + round(samples_emitted / 48000 * 1000),
+                                        start_ms,
                                         bytes(pcm[:size]),
                                         timing_note=(
                                             "receive/sample clock; derived PTS jumps observed"

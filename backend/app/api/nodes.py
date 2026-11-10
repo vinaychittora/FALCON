@@ -27,6 +27,8 @@ class NodeUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str | None = Field(default=None, min_length=1, max_length=80)
     audio_analysis: bool | None = None
+    # "node": this node's camera; "ip": the saved IP camera, with sound from this node.
+    video_source: Literal["node", "ip"] | None = None
 
 
 class StreamAction(BaseModel):
@@ -116,7 +118,9 @@ async def update(node_id: str, request: Request) -> dict[str, Any]:
     body: NodeUpdate = await _body(request, NodeUpdate)
     manager = _manager(request)
     try:
-        return manager.summary(manager.store.update(node_id, name=body.name, audio_analysis=body.audio_analysis))
+        return manager.summary(manager.store.update(
+            node_id, name=body.name, audio_analysis=body.audio_analysis, video_source=body.video_source,
+        ))
     except Exception as exc:
         _fail(exc)
 
@@ -159,6 +163,69 @@ async def camera(node_id: str, request: Request) -> dict[str, Any]:
     if not isinstance(changes, dict) or len(changes) > 30:
         raise HTTPException(422, "Send camera settings as a JSON object")
     return await run_in_threadpool(_control, request, node_id, lambda client: client.camera(changes))
+
+
+class PictureChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    values: dict[str, int] | None = Field(default=None, max_length=20)
+    reset: bool = False
+
+
+def _picture(request: Request, node_id: str, body: PictureChange | None) -> dict[str, Any]:
+    try:
+        client = _manager(request).client(node_id)
+        if body is None:
+            return client.picture()
+        if body.reset:
+            return client.set_picture({"reset": True})
+        if not body.values:
+            raise ValueError("Choose at least one picture control to change")
+        return client.set_picture({"values": body.values})
+    except Exception as exc:
+        _fail(exc)
+
+
+@router.get("/{node_id}/camera/controls")
+async def picture_controls(node_id: str, request: Request) -> dict[str, Any]:
+    """The USB webcam's picture controls, with current values; changes apply without a restart."""
+    return await run_in_threadpool(_picture, request, node_id, None)
+
+
+@router.put("/{node_id}/camera/controls")
+async def set_picture_controls(node_id: str, request: Request) -> dict[str, Any]:
+    body: PictureChange = await _body(request, PictureChange)
+    return await run_in_threadpool(_picture, request, node_id, body)
+
+
+class ExtraChange(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: Literal["hotspot", "bluetooth"]
+    on: bool | None = None
+    at_boot: bool | None = None
+
+
+def _extras(request: Request, node_id: str, body: ExtraChange | None) -> dict[str, Any]:
+    try:
+        client = _manager(request).client(node_id)
+        if body is None:
+            return client.extras()
+        if body.on is None and body.at_boot is None:
+            raise ValueError("Choose on/off or start at boot")
+        return client.set_extra(body.model_dump(exclude_none=True))
+    except Exception as exc:
+        _fail(exc)
+
+
+@router.get("/{node_id}/extras")
+async def node_extras(node_id: str, request: Request) -> dict[str, Any]:
+    """The node's optional extras (hotspot, Bluetooth) plus temperature and heat protection."""
+    return await run_in_threadpool(_extras, request, node_id, None)
+
+
+@router.put("/{node_id}/extras")
+async def set_node_extra(node_id: str, request: Request) -> dict[str, Any]:
+    body: ExtraChange = await _body(request, ExtraChange)
+    return await run_in_threadpool(_extras, request, node_id, body)
 
 
 @router.put("/{node_id}/microphone")

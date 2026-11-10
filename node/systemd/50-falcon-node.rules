@@ -1,9 +1,25 @@
-// Lets the falcon-node service restart or shut down the node when asked from FALCON's web UI.
+// Lets the falcon-node service restart or shut down the node when asked from FALCON's web UI,
+// bring network connections up or down (the "falcon-hotspot" on demand) and start or stop
+// Bluetooth. Nothing else: it cannot change network settings or other services.
 polkit.addRule(function (action, subject) {
-  if (subject.user === "falcon-node" && [
+  if (subject.user !== "falcon-node") {
+    return polkit.Result.NOT_HANDLED;
+  }
+  if ([
     "org.freedesktop.login1.reboot", "org.freedesktop.login1.reboot-multiple-sessions",
     "org.freedesktop.login1.power-off", "org.freedesktop.login1.power-off-multiple-sessions",
+    "org.freedesktop.NetworkManager.network-control",
+    // Starting the "falcon-hotspot" connection is Wi-Fi sharing; NetworkManager refuses
+    // it with "Not authorized to share connections via wifi" without these two.
+    "org.freedesktop.NetworkManager.wifi.share.protected",
+    "org.freedesktop.NetworkManager.wifi.share.open",
   ].indexOf(action.id) >= 0) {
     return polkit.Result.YES;
   }
+  if (action.id === "org.freedesktop.systemd1.manage-units" &&
+      action.lookup("unit") === "bluetooth.service" &&
+      ["start", "stop"].indexOf(action.lookup("verb")) >= 0) {
+    return polkit.Result.YES;
+  }
+  return polkit.Result.NOT_HANDLED;
 });

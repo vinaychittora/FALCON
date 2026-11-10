@@ -151,6 +151,69 @@ def test_live_request_uses_the_node_stream_with_derived_credentials(node: Agent,
     assert nodes.live_request("backyard-1", AnalysisSettings(audio_enabled=True)).config.audio_enabled is False
 
 
+def test_api_reads_and_changes_webcam_picture_controls(
+    node: Agent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    node.camera = media.Camera("v4l2", "/dev/video0", "USB Camera", "mjpeg", ("1280x720",))
+    listing = (
+        "  brightness 0x00980900 (int)    : min=-64 max=64 step=1 default=0 value=0\n"
+        "  sharpness 0x0098091b (int)    : min=0 max=14 step=1 default=10 value=10\n"
+    )
+    applied: list[str] = []
+
+    class Result:
+        returncode, stdout = 0, listing
+
+    def run(command: list[str], **kwargs: object) -> Result:
+        if "-c" in command:
+            applied.append(command[-1])
+        return Result()
+
+    monkeypatch.setattr(media.shutil, "which", lambda name: "/usr/bin/" + name)
+    monkeypatch.setattr(media, "run", run)
+    app = create_app(Settings(data_dir=tmp_path / "falcon"))
+    with TestClient(app) as client:
+        client.post("/api/nodes", json={"address": address(node), "pairing_key": KEY})
+        controls = client.get("/api/nodes/backyard-1/camera/controls").json()
+        assert [item["name"] for item in controls["controls"]] == ["brightness", "sharpness"]
+        changed = client.put("/api/nodes/backyard-1/camera/controls", json={"values": {"sharpness": 12}})
+        assert changed.status_code == 200 and changed.json()["saved"] == {"sharpness": 12}
+        assert applied == ["sharpness=12"]
+        too_high = client.put("/api/nodes/backyard-1/camera/controls", json={"values": {"sharpness": 40}})
+        assert too_high.status_code == 422 and "between 0 and 14" in too_high.text
+        assert client.put("/api/nodes/backyard-1/camera/controls", json={}).status_code == 422
+        assert client.put("/api/nodes/backyard-1/camera/controls", json={"values": {"x": "a"}}).status_code == 422
+        reset = client.put("/api/nodes/backyard-1/camera/controls", json={"reset": True})
+        assert reset.status_code == 200 and reset.json()["saved"] == {}
+        assert client.get("/api/nodes/unknown/camera/controls").status_code == 404
+
+
+def test_api_switches_node_extras_and_reports_heat(
+    node: Agent, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from falcon_node import extras
+
+    switched: list[tuple[str, bool]] = []
+    monkeypatch.setattr(extras, "state", lambda name: {"available": True, "on": name == "hotspot"})
+    monkeypatch.setattr(extras, "switch", lambda name, on: switched.append((name, on)))
+    app = create_app(Settings(data_dir=tmp_path / "falcon"))
+    with TestClient(app) as client:
+        client.post("/api/nodes", json={"address": address(node), "pairing_key": KEY})
+        listing = client.get("/api/nodes/backyard-1/extras").json()
+        assert [item["name"] for item in listing["extras"]] == ["hotspot", "bluetooth"]
+        assert listing["thermal"]["state"] == "normal" and listing["thermal"]["stop_c"] == 84
+        off = client.put("/api/nodes/backyard-1/extras", json={"name": "hotspot", "on": False})
+        assert off.status_code == 200 and switched == [("hotspot", False)]
+        boot = client.put("/api/nodes/backyard-1/extras", json={"name": "bluetooth", "at_boot": True})
+        assert boot.status_code == 200 and node.state.extras_at_boot == {"bluetooth": True}
+        assert client.put("/api/nodes/backyard-1/extras", json={"name": "hdmi", "on": True}).status_code == 422
+        assert client.put("/api/nodes/backyard-1/extras", json={"name": "hotspot"}).status_code == 422
+        assert client.put("/api/nodes/backyard-1/extras", json={"name": "hotspot", "on": "no"}).status_code == 422
+        # The thermal guard's state reaches FALCON with the node status.
+        summary = client.get("/api/nodes").json()["nodes"][0]
+        assert summary["status"]["thermal"]["state"] == "normal"
+
+
 def test_api_pairs_controls_and_forgets_without_echoing_the_key(node: Agent, tmp_path: Path) -> None:
     app = create_app(Settings(data_dir=tmp_path / "falcon"))
     with TestClient(app) as client:

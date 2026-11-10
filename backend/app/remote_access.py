@@ -11,10 +11,12 @@ from pathlib import Path
 from typing import Any
 
 from starlette.datastructures import Headers
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from starlette.websockets import WebSocketDisconnect
 
+from app.lan_access import LOGIN_PATH, LanAccessService, lan_request, same_site, signed_in
+from app.lan_access import login as lan_login
 from app.taxonomy.cache import atomic_json
 
 TARGET = "http://127.0.0.1:8000"
@@ -254,9 +256,37 @@ class RemoteAccessService:
 
 
 class RemoteAccessMiddleware:
-    def __init__(self, app: ASGIApp, service: RemoteAccessService):
+    def __init__(self, app: ASGIApp, service: RemoteAccessService, lan: LanAccessService | None = None):
         self.app = app
         self.service = service
+        self.lan = lan
+
+    async def _home_network(self, scope: Scope, receive: Receive, send: Send, headers: Headers) -> bool:
+        """Serve a phone on the home network when that is switched on; False to fall through."""
+        lan = self.lan
+        if lan is None or not lan.enabled:
+            return False
+        authority = lan_request(scope, headers, lan.port, lan.hostnames())
+        if authority is None:
+            return False
+        path = scope.get("path", "")
+        if scope["type"] == "http" and path == LOGIN_PATH:
+            await lan_login(lan, scope, receive, send, authority)
+            return True
+        if signed_in(lan, headers) and same_site(headers, authority):
+            if path == "/api/videos/upload":
+                await JSONResponse({"detail": "Upload media from the device itself."}, status_code=403)(
+                    scope, receive, send)
+                return True
+            # The same restricted mode as approved remote admins: no uploads, no access management.
+            scope["falcon.remote_authenticated"] = True
+            scope["falcon.lan"] = True
+            await self.app(scope, receive, send)
+            return True
+        if scope["type"] == "http" and not path.startswith("/api/"):
+            await RedirectResponse(LOGIN_PATH, status_code=303)(scope, receive, send)
+            return True
+        return False
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] not in {"http", "websocket"}:
@@ -271,6 +301,8 @@ class RemoteAccessMiddleware:
         client = scope.get("client")
         loopback = bool(client and client[0] in {"127.0.0.1", "::1", "testclient"})
         is_local = loopback and hostname in LOCAL_HOSTS and not proxied and len(headers.getlist("host")) == 1
+        if not is_local and await self._home_network(scope, receive, send, headers):
+            return
         allowed = is_local
 
         def remote_allowed() -> bool:

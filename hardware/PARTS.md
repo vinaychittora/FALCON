@@ -1,11 +1,11 @@
 # Sensor node parts list
 
-Updated **2026-10-17**. Vinay reports that the remaining products have been
-ordered. Treat the listed parts as available for the build; delivery, exact
-received variants and physical fit have not been inspected. This is an assembly
-inventory, with no further purchases proposed.
+The parts the FALCON sensor node is built from, what each one does and how it is
+connected. All of them are part of the build kit; check each received part against
+the notes below before wiring or printing. Hardware changes and upgrades are a later
+stage, so design and build around exactly this list.
 
-## Original hardware — owned or ordered
+## Core electronics
 
 | Component | Role and assembly note |
 | --- | --- |
@@ -16,12 +16,12 @@ inventory, with no further purchases proposed.
 | Kingston **Canvas Select Plus 32 GB microSDXC**, UHS-I / Class 10, with SD adapter | Pi operating system and node software. |
 | Raspberry Pi **3-in-1 heatsink set, RS099** | Check physical clearance beneath the audio HAT before fitting. |
 
-Kit accessories also belong to this inventory: the camera's supplied 200 mm,
+Kit accessories belong to this inventory too: the camera's supplied 200 mm,
 15-pin ribbon, the audio HAT's GPIO extension header/spacers/fasteners, the SD
-adapter and the power supply's attached USB-C lead. Verify the received kit
-contents and clearance rather than duplicating or assuming missing accessories.
+adapter and the power supply's attached USB-C lead. Check the kit contents and
+clearance rather than assuming missing accessories.
 
-## Added hardware — ordered, assumed available
+## Sensors, power and wiring
 
 | Supplier | Product and exact option | Supplier SKU | Role |
 | --- | --- | --- | --- |
@@ -31,15 +31,14 @@ contents and clearance rather than duplicating or assuming missing accessories.
 | ThinkRobotics | BME280 Digital Sensor **3.3 V**, **With Soldered Pins** | **ELC1077S** | Ambient temperature, relative humidity and pressure. |
 | ThinkRobotics | Waveshare Industrial Gigabit PoE Splitter **25 W**, **Type C** | **WVSH0170** | Separates PoE into Pi USB-C power and Ethernet. |
 
-The AR609 kit listing included five 20 cm Dupont leads; check them in the box.
-The BME280 option has a soldered header. Supplier names and SKUs identify the
-chosen variants; they do not certify the received board's pinout or workmanship.
+The AR609 kit includes five 20 cm Dupont leads. The BME280 option has a soldered
+header. Supplier names and SKUs identify the chosen variants; they do not certify
+the received board's pinout or workmanship, so check the labels before wiring.
 
 ## Cables, enclosure and assembly fittings
 
-Treat these as build-kit items under the user's availability assumption. Their
-exact received models, sizes and quantities have not been supplied. Verify them
-against the actual parts before drilling or printing; this is not another order.
+The exact models, sizes and quantities of these items depend on the kit at hand.
+Measure them against the actual parts before drilling or printing.
 
 | Item | Fit or rating to verify |
 | --- | --- |
@@ -131,13 +130,12 @@ controller dry and expose only the plate. Verify which DO level means wet for
 the received module. Dew may trigger it, drying takes time and the plate can
 corrode: it is a replaceable wetness sensor, not a rainfall measurement gauge.
 
-## Build status
+## Before outdoor use
 
-The node software for all of these parts is written and tested off the Pi
-(`node/`, see [the sensor node guide](../docs/SENSOR_NODE.md)). The combined Pi, camera,
-audio HAT and sensors have not yet been run together on the actual node. Check capture, sound, both sensors, network
-reconnection, thermals and restart behaviour on the bench before outdoor use.
-Battery and solar sizing remain separate work requiring measured power use.
+The node software for all of these parts is in `node/` (see
+[the sensor node guide](../docs/SENSOR_NODE.md)). Check capture, sound, both sensors,
+network reconnection, thermals and restart behaviour on the bench before outdoor use.
+Battery and solar sizing are separate work that needs measured power use.
 
 Technical reference: Bosch Sensortec BME280 datasheet, interface selection and
 I2C connection sections. The physical-header assignment above is the FALCON

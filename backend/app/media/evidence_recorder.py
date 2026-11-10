@@ -21,10 +21,16 @@ from typing import Any
 from uuid import uuid4
 
 import av
+import numpy as np
 
+from app.inference.privacy import redact_yuv420
 from app.media.base import Frame
+from app.media.crop import crop_frame
+from app.schemas import BBox
 
 Result = dict[str, Any]
+# Codecs whose every frame stands alone (a node passing its webcam's MJPEG through).
+INTRA_ONLY = frozenset({"mjpeg"})
 
 
 @dataclass(frozen=True)
@@ -70,6 +76,31 @@ class _Pin:
     # A continuation clip starts where the previous clip ended, so it is shorter
     # by design; only missing stream coverage makes a clip partial.
     expected_seconds: float = 5.0
+    # Normalized boxes of people seen around this interval; masked in every frame.
+    redact: list[BBox] = field(default_factory=list)
+    # The detected frame was shown in greyscale (night picture applied by FALCON).
+    greyscale: bool = False
+    # Percent cut off the left and right (Crop sides), as in the detected frame.
+    crop: tuple[float, float] = (0.0, 0.0)
+
+
+def _masked(frame: Any, boxes: list[BBox]) -> Any:
+    """Gray out people in a yuv420p frame: one copy of the planes, no colour conversion."""
+    planes = np.ascontiguousarray(frame.to_ndarray())
+    redact_yuv420(planes, frame.width, frame.height, boxes)
+    masked = av.VideoFrame.from_ndarray(planes, format="yuv420p")
+    masked.time_base = frame.time_base
+    return masked
+
+
+def _grey(frame: Any) -> Any:
+    """Greyscale a yuv420p frame by setting both colour planes to neutral."""
+    planes = np.ascontiguousarray(frame.to_ndarray())
+    luma = frame.width * frame.height
+    planes.reshape(-1)[luma:] = 128
+    grey = av.VideoFrame.from_ndarray(planes, format="yuv420p")
+    grey.time_base = frame.time_base
+    return grey
 
 
 class EvidenceRecorder:
@@ -89,11 +120,18 @@ class EvidenceRecorder:
         buffer_seconds: float = 15,
         max_bytes: int = 64 * 1024**2,
         max_pins: int = 8,
+        pre_seconds: float = 2.0,
+        post_seconds: float = 3.0,
     ):
-        if reserve_bytes < 0 or buffer_seconds < 5 or max_bytes < 1 or max_pins < 1:
+        if (
+            reserve_bytes < 0 or buffer_seconds < 5 or max_bytes < 1 or max_pins < 1
+            or not 0 <= pre_seconds <= buffer_seconds - 2 or post_seconds <= 0
+        ):
             raise ValueError("Invalid evidence recorder limits")
         self.root, self.on_complete = root, on_complete
         self.reserve_bytes, self.buffer_seconds = reserve_bytes, buffer_seconds
+        # A clip covers pre_seconds before the detected frame and post_seconds after it.
+        self.pre_seconds, self.post_seconds = pre_seconds, post_seconds
         self.max_bytes, self.max_pins = max_bytes, max_pins
         self._lock = threading.RLock()
         self._ring: deque[_Packet] = deque()
@@ -144,8 +182,8 @@ class EvidenceRecorder:
             self._last_dts = None
             if self._closed:
                 self._status = "stopped"
-            elif generation.codec not in {"h264", "hevc"}:
-                self._fault = "Video evidence supports H.264 and H.265 camera streams."
+            elif generation.codec not in {"h264", "hevc", *INTRA_ONLY}:
+                self._fault = "Video evidence supports H.264, H.265 and MJPEG camera streams."
                 self._status = "unsupported codec"
             else:
                 self._status = "buffering"
@@ -193,7 +231,9 @@ class EvidenceRecorder:
             self._sequence += 1
             copy = _Packet(
                 self._sequence, data, packet.pts, packet.dts, int(packet.duration or 0),
-                Fraction(packet.time_base), bool(packet.is_keyframe),
+                Fraction(packet.time_base),
+                # Every MJPEG frame is a complete picture; RTP does not always flag it.
+                bool(packet.is_keyframe) or generation.codec in INTRA_ONLY,
             )
             if self._last_dts is not None and (
                 copy.time < self._last_dts - 0.5 or copy.time > self._last_dts + 5
@@ -256,8 +296,11 @@ class EvidenceRecorder:
                 return None
             pin = _Pin(
                 uuid4().hex, generation, source_time, frame.timestamp_ms,
-                max(source_time - 2, source_time - max(0, frame.timestamp_ms) / 1000),
-                source_time + 3,
+                max(source_time - self.pre_seconds, source_time - max(0, frame.timestamp_ms) / 1000),
+                source_time + self.post_seconds,
+                expected_seconds=self.pre_seconds + self.post_seconds,
+                greyscale=frame.greyscale,
+                crop=frame.crop,
             )
             packets = list(self._ring)
             before = [i for i, p in enumerate(packets) if p.keyframe and p.presentation_time <= pin.start]
@@ -273,8 +316,14 @@ class EvidenceRecorder:
             self._pins[pin.identity] = pin
             return pin.identity
 
-    def request(self, pin_id: str, evidence_id: str, *, start_ms: int | None = None) -> None:
-        """Queue a pinned interval; start_ms (session time) trims a continuation clip."""
+    def request(
+        self, pin_id: str, evidence_id: str, *, start_ms: int | None = None,
+        redact: list[BBox] | None = None,
+    ) -> None:
+        """Queue a pinned interval; start_ms (session time) trims a continuation clip.
+
+        redact lists normalized boxes (people) that are masked in the saved clip.
+        """
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,99}", evidence_id):
             raise ValueError("Invalid evidence ID")
         failure = None
@@ -290,6 +339,7 @@ class EvidenceRecorder:
                 failure = "The capture interval is no longer available."
             else:
                 pin.evidence_id = evidence_id
+                pin.redact = list(redact or [])
                 if start_ms is not None:
                     start = pin.source_time - (pin.session_ms - start_ms) / 1000
                     if pin.start < start < pin.end:
@@ -407,6 +457,8 @@ class EvidenceRecorder:
                             return
                         if start is None:
                             start = begin
+                        if any(pin.crop):
+                            frame = crop_frame(frame, *pin.crop)
                         if stream is None:
                             stream = output.add_stream("libx264", rate=pin.generation.rate)
                             stream.width, stream.height = frame.width, frame.height
@@ -417,6 +469,10 @@ class EvidenceRecorder:
                             stream.codec_context.thread_count = 2
                             stream.options = {"preset": "veryfast", "crf": "20", "tune": "zerolatency"}
                         converted = frame.reformat(format="yuv420p")
+                        if pin.greyscale:
+                            converted = _grey(converted)
+                        if pin.redact:
+                            converted = _masked(converted, pin.redact)
                         converted.pts = round((begin - start) / float(time_base))
                         converted.time_base = time_base
                         # Round the absolute end on the same timebase as PTS.
