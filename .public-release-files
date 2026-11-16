@@ -4,6 +4,8 @@
 .gitignore
 .public-release-assets.json
 .public-release-files
+ADDITIONAL-TERMS.md
+CITATION.cff
 LICENSE
 Makefile
 NOTICE

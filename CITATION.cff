@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use FALCON, or build on it, please cite it as below."
+title: "FALCON: Field Acoustic, Lens & Climate Observation Node"
+type: software
+authors:
+  - family-names: Chittora
+    given-names: Vinay
+repository-code: "https://github.com/vinaychittora/FALCON"
+url: "https://mhtr.in/falcon/"
+license: AGPL-3.0-only
