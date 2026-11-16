@@ -1,6 +1,19 @@
 FALCON — Field Acoustic, Lens & Climate Observation Node
-Copyright 2026 Vinay Chittora
+Copyright (C) 2026 Vinay Chittora
 Developed by Vinay Chittora.
+
+This program is free software: you can redistribute it and/or modify it under the terms
+of the GNU Affero General Public License as published by the Free Software Foundation,
+version 3 of the License, with the additional terms in ADDITIONAL-TERMS.md that section 7
+of the License permits. In short, those terms say: keep the author credit, mark a changed
+version as changed, and give a changed version its own name.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+See the GNU Affero General Public License in the file LICENSE for more details.
+
+The code up to and including commit f6e2995, which contains release v1.0, was published
+under the Apache License 2.0 and stays available under that license.
 
 Pretrained model weights and third-party dependencies have separate licenses.
 See docs/model-licenses.md.

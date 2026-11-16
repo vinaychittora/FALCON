@@ -155,7 +155,24 @@ short, is described on the [project page](https://mhtr.in/falcon/).
 
 ## License and credits
 
-Application code: [Apache 2.0](LICENSE). Developer: **Vinay Chittora**.
+FALCON is developed by **Vinay Chittora**. Copyright (C) 2026 Vinay Chittora.
+
+The application code is free software under the
+[GNU Affero General Public License, version 3](LICENSE), with the
+[additional terms](ADDITIONAL-TERMS.md) that section 7 of the license permits. In plain
+words:
+
+- You may use FALCON, study it, change it and share it.
+- If you share FALCON or a changed version, or run a changed version that other people use
+  over a network, you must offer them the source code of your version under this same
+  license.
+- Keep the author credit in the files and on screen, say clearly that a changed version
+  is changed, and give it its own name. The license does not cover the name FALCON or
+  its mark.
+
+The code up to and including commit `f6e2995`, which contains release `v1.0`, was
+published under the Apache License 2.0 and stays available under that license.
+
 The models (MegaDetector, BioCLIP, BirdNET), MediaMTX, the Waveshare audio HAT mixer file
 and iNaturalist taxonomy keep their own licenses and attribution; see
 [docs/model-licenses.md](docs/model-licenses.md) and [NOTICE](NOTICE).
