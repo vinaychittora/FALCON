@@ -11,7 +11,7 @@ as private and never put it in Git.
 | Location | Contents |
 | --- | --- |
 | `data/falcon.sqlite3` (+ `-wal`, `-shm`) | The authority: observations, reviews and their audit trail, clip records, sessions, sensor readings, paired nodes, camera profile |
-| `data/evidence/` | Saved 5-second video clips (MP4) and sound clips (WAV) |
+| `data/evidence/` | Saved 10-second video clips (MP4) and sound clips (WAV) |
 | `data/samples/` | Media test uploads (originals) |
 | `data/settings.json` | Analysis settings, including the optional site location |
 | `data/private/camera.key` | Key that encrypts camera passwords and node pairing keys |
@@ -27,8 +27,9 @@ On a sensor node: settings in `/etc/falcon-node/node.conf`, switches and camera 
 
 ## What is kept
 
-- Continuous video is **not** recorded. For each animal visit FALCON keeps a 5-second
-  video clip from a short rolling buffer, and a WAV clip for each sound detection.
+- Continuous video is **not** recorded. For each animal visit FALCON keeps 10-second video
+  clips from a short rolling buffer (one at arrival, then one every 10 seconds while the
+  animal stays), and WAV clips of sound detections.
 - Nothing is deleted automatically: clips, observations and reviews stay until you remove
   them. *Discard* hides a record and keeps it out of exports, but keeps it in the audit trail.
 - Media tests are temporary: **End test session** removes that session's uploads and results.

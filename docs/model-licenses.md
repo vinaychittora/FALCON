@@ -19,7 +19,7 @@ third-party data or the user's recordings. These are separate artifacts and perm
 | Sensor node stream server | MediaMTX v1.21.2, downloaded by `node/install.sh` and checked against its SHA-256 | [MIT](https://github.com/bluenviron/mediamtx/blob/main/LICENSE); its LICENSE is installed next to the binary. Not stored in this repository. |
 | Audio HAT mixer settings | `node/audio/da7212-onboard-mic1.state` from Waveshare's DA7212 Audio HAT (B) examples, unchanged | Apache 2.0, copyright Waveshare; see `node/audio/LICENSE-waveshare.txt`. |
 | Camtrap DP | Table schemas and profile referenced by URL in exports | [Camtrap DP](https://github.com/tdwg/camtrap-dp) by TDWG, MIT. |
-| Manufacturer drawings | `hardware/manufacturer-references/` (Raspberry Pi, Camera Module 3 and Waveshare mechanical drawings and schematics) | Copyright of their makers, kept for building the enclosure. Raspberry Pi drawings are published by Raspberry Pi Ltd; Waveshare files under their repository's Apache 2.0 license. Exclude them from a public release if in doubt. |
+| Manufacturer drawings | Raspberry Pi, Camera Module 3 and Waveshare mechanical drawings and schematics, used to design the enclosure | Copyright of their makers. They are not part of this repository (`hardware/manufacturer-references/` is ignored by Git); download them from the makers' own sites. |
 | User samples | Original media supplied by the operator | User-provided content, not included in Git and not relicensed by this project. |
 
 PyTorchWildlife's installed dependency tree includes additional packages, including

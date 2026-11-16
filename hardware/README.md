@@ -3,6 +3,10 @@
 Everything needed to build the FALCON sensor node: a Raspberry Pi 4 with Camera Module 3,
 Waveshare DA7212 Audio HAT (B), BME280 and a rain plate, in a 3D-printed enclosure on a pole.
 
+**Status:** this enclosure is a design. It has not been printed or assembled yet. Build 1 of
+FALCON runs in a plastic junction box, with a USB infrared webcam in place of the Camera
+Module 3.
+
 | Path | Contents |
 | --- | --- |
 | [PARTS.md](PARTS.md) | Parts list and what each part is for |
@@ -14,7 +18,7 @@ Waveshare DA7212 Audio HAT (B), BME280 and a rain plate, in a 3D-printed enclosu
 | `drawings/` | Eight dimensioned sheets (PDF and PNG) |
 | `renders/` | Assembly, exploded and part views used by the handbook |
 | `handbook/` | Source and builder of the [node build handbook](../docs/handbooks/FALCON-Node-Build-Handbook.pdf) |
-| `manufacturer-references/` | Mechanical drawings and schematics from Raspberry Pi and Waveshare used for the design |
+| `manufacturer-references/` | Not in the repository. Mechanical drawings and schematics from Raspberry Pi and Waveshare that were used for the design; download them from the makers' own sites |
 
 The node software is in [../node](../node) and its guide in
 [../docs/SENSOR_NODE.md](../docs/SENSOR_NODE.md).
