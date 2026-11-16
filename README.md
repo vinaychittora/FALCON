@@ -15,7 +15,7 @@ Everything runs on your own hardware. No video, sound or records go to a cloud s
 ```mermaid
 flowchart LR
   subgraph node[Sensor node: Raspberry Pi]
-    cam[Camera Module 3] --> stream[RTSP stream]
+    cam[Camera] --> stream[RTSP stream]
     mic[Audio HAT microphones] --> stream
     bme[BME280 weather] --> queue[Readings queue]
     rain[Rain plate] --> queue
@@ -42,7 +42,8 @@ apart: the node in the garden and the computer indoors on the home network.
 - **Sensor node control** from the web page: start/stop the stream, switch the camera,
   microphone, weather sensor and rain plate on or off, focus, exposure, white balance, HDR,
   resolution and more, node health (temperature, power, storage, Wi-Fi, clock), restart.
-- **Evidence**: a 5-second video clip per visit and a WAV clip per bird call, with crops and
+- **Evidence**: 10-second video clips of each visit (one at arrival, then one every
+  10 seconds while the animal stays) and WAV clips of bird calls, with crops and
   spectrograms on every review card. No continuous recording.
 - **Weather** every 30 seconds, attached to each detection, kept even when the network drops.
 - **Export** a time window as a Camtrap DP 1.0 package (GBIF, Agouti, Wildlife Insights,
@@ -92,6 +93,9 @@ The [node build handbook](docs/handbooks/FALCON-Node-Build-Handbook.pdf) explain
 wiring, power (USB-C or PoE), 3D-printed enclosure and assembly step by step. Printable
 STL/STEP files, drawings and the parametric CAD model are in [hardware/](hardware/).
 
+The enclosure is a design for the Raspberry Pi Camera Module 3 and has not been printed yet.
+Build 1 runs in a plastic junction box with a USB infrared webcam (see [Status](#status)).
+
 ## Documentation
 
 All of these are also inside FALCON: open **Help** in the menu (with search across every guide).
@@ -133,12 +137,21 @@ make build      # production interface
 Python 3.11 (FastAPI, PyTorch, PyAV) for the inference node, standard-library Python 3.11+
 for the sensor node, React + TypeScript for the interface, SQLite for storage.
 
+Changes reach `main` through pull requests only: push a branch or a fork and open one.
+Direct pushes to `main` are refused.
+
 ## Status
 
-The inference node, interface and sensor-node software are complete and tested on a Linux PC
-with a live IP camera and a simulated node stream. The Raspberry Pi node has been designed
-and its software tested off the Pi; the first run on the assembled hardware (camera, audio HAT
-and sensors) is the next acceptance step. Jetson packaging is not done yet.
+FALCON is a working prototype. Build 1 (tag `v1.0`) was put together between 27 October and
+10 November 2026 in a backyard in Kota, Rajasthan, and its node has watched one water bowl
+there since the evening of 7 November 2026. The sensor node is a Raspberry Pi 4 with a USB
+infrared webcam, the audio HAT, a BME280 and a rain plate in a plastic junction box on one
+PoE cable. The inference node is a Windows PC (WSL2) with an NVIDIA GPU.
+
+Not done yet: the 3D-printed enclosure in [hardware/](hardware/) has never been printed,
+Jetson packaging is not done, and the Camtrap DP export validates against the standard but
+has not been loaded into anyone else's tools. What Build 1 recorded, and where it falls
+short, is described on the [project page](https://mhtr.in/falcon/).
 
 ## License and credits
 

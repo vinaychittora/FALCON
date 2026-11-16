@@ -9,7 +9,7 @@ and rain-plate wetness. FALCON controls it from the **Sensors** page.
             where the animals are                       anywhere on the same network
  ┌──────────────────────────────────────┐            ┌──────────────────────────────────┐
  │ Sensor node (Raspberry Pi)           │            │ Inference computer (PC, mini PC) │
- │  Camera Module 3 ─┐                  │  RTSP      │  FALCON: detection, species,     │
+ │  Camera ──────────┐                  │  RTSP      │  FALCON: detection, species,     │
  │  Audio HAT mics ──┼─ stream :8554  ◄─┼────────────┼─ bird calls, review, export      │
  │  BME280, rain ────┴─ readings queue  │  HTTP      │                                  │
  │                    control API :8780◄┼────────────┼─ status, settings, readings      │
@@ -26,7 +26,7 @@ Internet is needed once, to install. After that the node works without it.
 | Part | Notes |
 | --- | --- |
 | Raspberry Pi 4 (1 GB is enough) with a 16–32 GB microSD card | Raspberry Pi OS Lite (64-bit), Bookworm or newer |
-| Camera Module 3 (or any camera, see below) | Connected to the CSI port |
+| A camera: a USB webcam, or Camera Module 3 on the CSI port | Build 1 uses a USB infrared webcam |
 | Waveshare DA7212 Audio HAT (B) | Onboard microphones; detected by itself as card `Zero` |
 | BME280 breakout (3.3 V) | I²C: SDA pin 3, SCL pin 5, 3.3 V pin 1, GND pin 6 |
 | Rain plate with LM393 controller | DO to GPIO17 (pin 11), VCC to 3.3 V (pin 17), GND (pin 9) |
@@ -34,7 +34,8 @@ Internet is needed once, to install. After that the node works without it.
 
 Wiring, the printed enclosure and assembly are in the
 [node build handbook](handbooks/FALCON-Node-Build-Handbook.pdf). The parts list is in
-[hardware/PARTS.md](../hardware/PARTS.md).
+[hardware/PARTS.md](../hardware/PARTS.md). The enclosure is a design for the Camera Module 3
+that has not been printed yet; Build 1 sits in a plastic junction box.
 
 Every sensor is optional. The node finds what is attached when it starts, and FALCON
 works with whatever is there: a camera only, a microphone only (sound-only nodes are
@@ -137,7 +138,10 @@ The node's settings are in `/etc/falcon-node/node.conf` (see
 ## How it works
 
 - **Stream.** `rpicam-vid` encodes H.264 in the Pi 4's hardware encoder (1080p, 15 fps,
-  one keyframe per second for tight evidence clips). `ffmpeg` adds the HAT's 48 kHz sound
+  one keyframe per second for tight evidence clips). A USB webcam is read through V4L2
+  instead: the node either encodes H.264 itself or sends the webcam's own MJPEG frames
+  untouched for the inference computer to decode (about 10 Mbit/s, so a wired network is
+  recommended). `ffmpeg` adds the HAT's 48 kHz sound
   as AAC and publishes one RTSP stream to a local [MediaMTX](https://github.com/bluenviron/mediamtx)
   server. Only localhost may publish; the inference computer reads with the user `falcon`
   and a password derived from the pairing key. If capture stops, the node restarts it
@@ -186,8 +190,11 @@ pinctrl get 17                          # rain: hi when dry, lo when wet
 Removing the node software: `sudo bash node/install.sh --uninstall` (settings and queued
 readings are kept until you delete `/etc/falcon-node` and `/var/lib/falcon-node`).
 
-Tested here: the full node software on a Linux PC with a relayed camera (stream, signed
-control, pairing, readings, clock correction, and FALCON reading the stream), the
-BME280 maths against Bosch's datasheet example, and the SD-card preparation for both
-Imager formats. Not yet tested: the assembled Raspberry Pi with the Camera Module 3,
-audio HAT and sensors. The first boot on real hardware is the acceptance test.
+Tested on real hardware: the node software on a Raspberry Pi 4 with a USB infrared webcam,
+the audio HAT, a BME280 and a rain plate, installed with `node/install.sh`. This is Build 1,
+which has stood outdoors since 7 November 2026. Tested on a Linux PC: the node software with
+a relayed camera (stream, signed control, pairing, readings, clock correction, and FALCON
+reading the stream), the BME280 maths against Bosch's datasheet example, and the SD-card
+preparation for both Imager formats. Not confirmed on real hardware: the node with the
+Camera Module 3 (Build 1 runs with the USB webcam) and the first boot from a card made by
+`prepare_sdcard.py`.
