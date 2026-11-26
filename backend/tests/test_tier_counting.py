@@ -1,7 +1,13 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Spec P5 cases: a name is earned by counting classified frames."""
 
 import json
 from pathlib import Path
+
+import pytest
 
 from app.inference.tiers import GroupIndex, TierCounter
 from app.inference.visits import VisitEngine
@@ -117,9 +123,9 @@ def test_u11_probable_then_group_then_species_rings_once():
 
 
 def test_u17_every_rajasthan_species_has_a_group():
-    path = Path("/home/vinay/Workspace/FALCON/data/taxa")
-    if not (path / "groups.json").exists():
-        return  # the data folder is not on this machine
+    path = Path(__file__).resolve().parents[2] / "data" / "taxa"
+    if not (path / "groups.json").exists() or not (path / "rajasthan_taxa.json").exists():
+        pytest.skip("needs data/taxa/groups.json and data/taxa/rajasthan_taxa.json (make taxa)")
     groups = json.loads((path / "groups.json").read_text())
     taxa = json.loads((path / "rajasthan_taxa.json").read_text())["taxa"]
     assert all(str(t["taxon_id"]) in groups and groups[str(t["taxon_id"])][2] for t in taxa)

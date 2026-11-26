@@ -1,0 +1,935 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
+/* Review list: one filter row, cards, and a bottom bar (measurements of the approved prototype). */
+
+.page.rl-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  max-width: none;
+}
+.rl-main {
+  flex: 1;
+}
+
+/* What to show: status, Filters, Refresh */
+.rl-fl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto 44px;
+  gap: 8px;
+  align-items: center;
+}
+.rl-sel {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+.rl-sel select,
+.rl-fpanel select,
+.rl-fpanel input:not([type="checkbox"]) {
+  width: 100%;
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--input-surface);
+  color: var(--ink);
+  font-size: 16px;
+}
+.rl-sel select {
+  padding: 0 32px 0 12px;
+  appearance: none;
+  -webkit-appearance: none;
+  text-overflow: ellipsis;
+}
+.rl-sel .rl-arr {
+  position: absolute;
+  right: 8px;
+  top: 12px;
+  color: var(--icon);
+  pointer-events: none;
+}
+.rl-fbtn {
+  height: 44px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--input-surface);
+  color: var(--ink);
+  padding: 0 8px 0 12px;
+  font-size: 16px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+.rl-fbtn.on {
+  border-color: var(--accent-fill);
+}
+.rl-fbtn.on .rl-fb-t::after {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  margin-left: 8px;
+  vertical-align: 1px;
+}
+.rl-fbtn svg {
+  color: var(--icon);
+  transition: transform 0.15s;
+}
+.rl-fbtn[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+.rl-refresh {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--input-surface);
+  color: var(--icon);
+}
+.rl-fsum {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 8px 0 0;
+}
+.rl-fsum.on {
+  color: var(--ink);
+}
+.rl-fpanel {
+  display: none;
+}
+.rl-fpanel.open {
+  display: flex;
+  /* Fields wrap inside the box; a long row must never push the page sideways. */
+  flex-wrap: wrap;
+}
+.rl-fpanel {
+  /* As many columns as fit (one on a phone), so the panel stays short. */
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  align-items: end;
+  gap: 12px 16px;
+  padding: 12px;
+  margin-top: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.rl-fpanel > label,
+.rl-fpanel .rl-field {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rl-fpanel select,
+.rl-fpanel input:not([type="checkbox"]) {
+  padding: 0 12px;
+}
+.rl-fpanel input::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.rl-fpanel .rl-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 15px;
+  color: var(--ink);
+}
+.rl-fpanel .rl-check input {
+  width: 22px;
+  height: 22px;
+}
+/* A number such as 0.35 needs a short box. */
+.rl-fpanel input[type="number"] {
+  max-width: 140px;
+}
+.rl-fpanel .certainty-legend {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.rl-act {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 48px;
+  margin-top: 8px;
+  padding-inline: 12px;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  text-decoration: none;
+}
+.rl-keys {
+  display: none;
+  color: var(--muted);
+  font-size: 13px;
+  margin: 10px 0 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .rl-keys {
+    display: block;
+  }
+}
+.rl-keys kbd {
+  font-size: 12px;
+}
+
+/* The cards */
+.rl-cards {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  transition: opacity 0.15s;
+}
+/* The list for changed filters is on its way: the old cards must not look current. */
+.rl-cards.stale {
+  opacity: 0.45;
+}
+/* Where "Show N records" goes, clear of the sticky page header; the loading note
+   floats over the top of the list so it never moves the cards. */
+.rl-list-top {
+  position: relative;
+  height: 0;
+  scroll-margin-top: 72px;
+}
+.rl-loading {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  z-index: 2;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+}
+/* No cards to float over: the note sits in the flow instead. */
+.rl-list-top.bare {
+  height: auto;
+}
+.rl-list-top.bare .rl-loading {
+  position: static;
+  display: inline-block;
+  margin-top: 12px;
+}
+.rl-loading:not(:empty) {
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rl-cards {
+    transition: none;
+  }
+}
+@media (min-width: 900px) {
+  .rl-cards {
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    align-items: start;
+  }
+}
+/* One stay: the animals seen in the same footage. One row (with or without the closed
+   line) sits in one cell like any card; more rows span their columns (rules below). */
+.rl-cards-box {
+  container: stays / inline-size;
+}
+.rl-stay {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--surface-muted);
+  min-width: 0;
+}
+.rl-stay.rl-stay-one {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.rl-stay-head {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.rl-stay-head img,
+.rl-stay-head .c-noimg {
+  width: 72px;
+  height: 54px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+}
+.rl-stay-t {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.35;
+}
+.rl-stay-t h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rl-stay-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  align-items: start;
+}
+/* A stay of N rows spans N columns of the list, and the whole row only when it fills it;
+   its rows use exactly those columns. The list has C columns at a width of 350*C - 10 px
+   (auto-fill, 340 px cards, 10 px gap); one block per C, so every width is exact. */
+@media (min-width: 900px) {
+  @container stays (min-width: 690px) {
+    .rl-stay:is([data-rows="2"],[data-rows="3"],[data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 2; }
+    .rl-stay:is([data-rows="2"],[data-rows="3"],[data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 1040px) {
+    .rl-stay:is([data-rows="3"],[data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 3; }
+    .rl-stay:is([data-rows="3"],[data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 1390px) {
+    .rl-stay:is([data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 4; }
+    .rl-stay:is([data-rows="4"],[data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 1740px) {
+    .rl-stay:is([data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 5; }
+    .rl-stay:is([data-rows="5"],[data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 2090px) {
+    .rl-stay:is([data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 6; }
+    .rl-stay:is([data-rows="6"],[data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 2440px) {
+    .rl-stay:is([data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 7; }
+    .rl-stay:is([data-rows="7"],[data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 2790px) {
+    .rl-stay:is([data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 8; }
+    .rl-stay:is([data-rows="8"],[data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(8, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 3140px) {
+    .rl-stay:is([data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 9; }
+    .rl-stay:is([data-rows="9"],[data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(9, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 3490px) {
+    .rl-stay:is([data-rows="10"],[data-rows="11"],[data-rows="12"]) { grid-column: span 10; }
+    .rl-stay:is([data-rows="10"],[data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(10, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 3840px) {
+    .rl-stay:is([data-rows="11"],[data-rows="12"]) { grid-column: span 11; }
+    .rl-stay:is([data-rows="11"],[data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(11, minmax(0, 1fr)); }
+  }
+  @container stays (min-width: 4190px) {
+    .rl-stay:is([data-rows="12"]) { grid-column: span 12; }
+    .rl-stay:is([data-rows="12"]) .rl-stay-rows { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+  }
+}
+.rl-stay-more > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.rl-stay-more > summary:hover {
+  color: var(--ink);
+  background: var(--surface-hover);
+}
+.rl-stay-more > summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.rl-stay-more[open] > summary {
+  margin-bottom: 8px;
+}
+.rl-card {
+  position: relative;
+  background: var(--surface);
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+  min-width: 0;
+}
+.rl-card:focus-visible,
+.rl-card :focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.rl-card.done {
+  box-shadow: inset 3px 0 0 var(--success-line);
+}
+.rl-card.picked {
+  border-color: var(--accent-fill);
+  background: var(--surface-muted);
+}
+.rl-card .c-open {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr) 20px;
+  gap: 12px;
+  align-items: start;
+  width: 100%;
+  min-height: 72px;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  border-radius: 8px;
+  color: inherit;
+  font: inherit;
+}
+.rl-card .c-open:hover .c-nm {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.rl-card .c-open img,
+.rl-card .c-noimg {
+  width: 96px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--media-surface);
+  display: block;
+}
+.rl-card .c-noimg {
+  display: grid;
+  place-items: center;
+  color: var(--media-text);
+}
+.rl-card .c-open > svg {
+  color: var(--icon);
+  margin-top: 26px;
+}
+.rl-card .c-t {
+  display: block;
+  min-width: 0;
+}
+.rl-card .c-nm {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.rl-card .c-sci {
+  display: block;
+  font-style: italic;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+/* An unidentified sound's front line: BirdNET's guess and why it is not a name. */
+.rl-card .c-guess {
+  display: block;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.rl-card .c-l {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 5px;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.rl-card .c-l .wh {
+  min-width: 0;
+  flex-basis: 100%;
+}
+.rl-card .nw {
+  white-space: nowrap;
+}
+.rl-card .c-m {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.rl-card .c-m b {
+  color: var(--ink);
+  font-weight: 600;
+}
+.rl-card .c-hint {
+  margin: -2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.rl-card .c-error {
+  margin: 0;
+  font-size: 13px;
+  color: var(--danger);
+}
+.rl-card .ck {
+  position: absolute;
+  left: 4px;
+  top: 4px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  z-index: 1;
+  cursor: pointer;
+}
+.rl-card .ck input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.rl-card .ck .bx {
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 2px solid #f4faeb;
+  background: rgba(11, 16, 13, 0.72);
+  display: grid;
+  place-items: center;
+  color: transparent;
+}
+.rl-card .ck input:checked + .bx {
+  background: var(--accent-fill);
+  border-color: var(--accent-fill);
+  color: var(--on-accent);
+}
+.rl-card .ck input:focus-visible + .bx {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+
+/* Four equal decisions, one row at every width */
+.rl-decs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.rl-card .decs {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+.rl-card .dec,
+.rl-decs .dec {
+  min-width: 0;
+  min-height: 44px;
+  padding: 4px 2px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 3px;
+}
+.rl-decs .dec {
+  min-height: 56px;
+}
+.rl-decs .dec svg {
+  width: 20px;
+  height: 20px;
+  color: var(--icon);
+}
+.rl-card .dec:hover:not(:disabled),
+.rl-decs .dec:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.rl-card .dec[aria-pressed="true"] {
+  background: var(--success-surface);
+  border-color: var(--success);
+  box-shadow: inset 0 0 0 1px var(--success);
+}
+.rl-card .dec:disabled,
+.rl-decs .dec:disabled {
+  opacity: 0.45;
+}
+.rl-card .c-done {
+  display: grid;
+  gap: 4px;
+}
+.rl-row-st {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 14px;
+}
+.rl-card .row-st {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 14px;
+}
+.rl-card .what,
+.rl-row-st .what {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-weight: 600;
+  color: var(--ink);
+}
+.rl-card .what span,
+.rl-row-st .what span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+.rl-card .what svg,
+.rl-row-st .what svg {
+  color: var(--success);
+  flex: none;
+}
+.rl-card .note {
+  height: 44px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--input-surface);
+  color: var(--ink);
+  padding: 0 12px;
+  font-size: 16px;
+}
+.rl-card .note::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+.tlink {
+  background: transparent;
+  border: 0;
+  color: var(--accent-fill);
+  font-weight: 600;
+  font-size: 14px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 10px;
+  border-radius: 8px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  flex: none;
+}
+.tlink:hover {
+  background: var(--surface-hover);
+}
+.rl-card .row-st .tlink,
+.rl-row-st .tlink {
+  margin-right: -10px;
+}
+
+/* Today's page description and totals, in one labelled expand above the filters */
+.rl-about {
+  margin: 12px 0 0;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.rl-about > summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--ink);
+  cursor: pointer;
+}
+.rl-about > summary b {
+  font-family: var(--mono);
+  font-weight: 600;
+}
+.rl-about > p {
+  margin: 0;
+  padding: 0 12px 12px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.rl-about a {
+  display: inline-block;
+  min-height: 24px;
+}
+
+/* Paging */
+.rl-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 14px;
+}
+.rl-pager button {
+  min-height: 44px;
+  min-width: 44px;
+}
+.rl-pager span {
+  text-align: center;
+  color: var(--muted);
+}
+
+/* The bottom bar: part of the page's column, never over the cards */
+.rl-foot {
+  display: block;
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  margin-top: 12px;
+  background: var(--surface);
+  border-top: 1px solid var(--line);
+  padding: 8px 16px max(8px, env(safe-area-inset-bottom, 0px));
+  margin-inline: -16px;
+}
+.rl-foot-in {
+  margin: 0 auto;
+  display: grid;
+  gap: 8px;
+}
+.rl-go {
+  width: 100%;
+  min-height: 56px;
+  border-radius: 10px;
+  border: 1px solid var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+  font-size: 16px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+.rl-go:hover:not(:disabled) {
+  background: var(--accent-fill-hover);
+}
+.rl-caught {
+  color: var(--muted);
+  font-size: 14px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+.rl-bulk-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 14px;
+  flex-wrap: wrap;
+}
+.rl-bulk-h b {
+  font-weight: 600;
+}
+/* "Saved 400 of 1,234…" while a whole-list action runs. */
+.rl-progress {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* Status Hidden: when they are cleared (shown at every width, unlike the caption). */
+.rl-clear-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+@media (min-width: 1200px) {
+  .rl-filters .rl-clear-note {
+    flex: 1 1 100%;
+    order: 101;
+    margin: 0;
+  }
+}
+/* A switch that means nothing in the chosen Status stays in place, dimmed. */
+.rl-fpanel .rl-check.off {
+  opacity: 0.5;
+}
+.rl-bulk-h .tlink:last-child {
+  margin-right: -10px;
+}
+.rl-reset {
+  justify-self: start;
+  margin-left: -10px;
+}
+@media (min-width: 900px) {
+  .rl-foot-in {
+    justify-items: end;
+  }
+  .rl-go {
+    width: auto;
+    min-width: 260px;
+    padding-inline: 20px;
+  }
+  .rl-bulk-h,
+  .rl-row-st,
+  .rl-decs {
+    width: min(100%, 560px);
+  }
+  .rl-reset {
+    justify-self: end;
+    margin-left: 0;
+  }
+  .rl-fl {
+    grid-template-columns: 240px auto 44px;
+    justify-content: start;
+  }
+}
+@media (max-width: 339px) {
+  .rl-fbtn {
+    padding: 0 12px;
+  }
+  .rl-fbtn svg {
+    display: none;
+  }
+  .rl-sel select {
+    padding: 0 28px 0 10px;
+  }
+  .rl-sel .rl-arr {
+    right: 5px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rl-fbtn svg {
+    transition: none;
+  }
+}
+/* The floating message sits above the bottom bar (--foot is its height, 0 without one). */
+.floating-toast {
+  bottom: calc(var(--foot, 0px) + max(16px, env(safe-area-inset-bottom, 0px)));
+}
+
+/* Compact labelled fields, sized by their content */
+.rl-fpanel > label,
+.rl-fpanel .rl-field {
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+.rl-fpanel select {
+  width: auto;
+  max-width: 260px;
+}
+.rl-fpanel .rl-species input {
+  width: 240px;
+}
+.rl-fpanel input[type="number"] {
+  width: 96px;
+  max-width: 96px;
+}
+.rl-fpanel .certainty-legend {
+  flex: 1 1 100%;
+  font-size: 12px;
+}
+.rl-status-cap {
+  display: none;
+}
+@media (max-width: 599px) {
+  .rl-fpanel > label {
+    flex: 1 1 100%;
+  }
+  .rl-fpanel select,
+  .rl-fpanel .rl-species input {
+    width: 100%;
+    max-width: none;
+  }
+  .rl-fpanel > .rl-score,
+  .rl-fpanel > .rl-hidden-switch {
+    flex: 1 1 40%;
+  }
+}
+/* From 1200 px the fields are always in view at the top: no Filters button, no panel
+   box and no caption, because the fields themselves show the state. */
+@media (min-width: 1200px) {
+  .rl-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 12px 16px;
+  }
+  .rl-filters .rl-fl,
+  .rl-filters .rl-fpanel {
+    display: contents !important;
+  }
+  .rl-fbtn,
+  .rl-fsum {
+    display: none !important;
+  }
+  /* One row at 1920 px and up: tighter gaps and a capped Session field. */
+  .rl-filters {
+    gap: 12px;
+  }
+  .rl-filters #review-source {
+    max-width: 210px;
+  }
+  .rl-filters .rl-hidden-switch {
+    font-size: 14px;
+  }
+  .rl-sel {
+    display: grid;
+    gap: 4px;
+    width: 220px;
+  }
+  .rl-status-cap {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .rl-sel .rl-arr {
+    top: auto;
+    bottom: 12px;
+  }
+  .rl-refresh {
+    order: 99;
+  }
+  .rl-filters .certainty-legend {
+    order: 100;
+    margin: -4px 0 0;
+  }
+}

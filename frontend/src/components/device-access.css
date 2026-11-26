@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
 .device-access {
   padding: 28px;
 }
@@ -129,3 +135,11 @@
     padding-top: 24px;
   }
 }
+
+/* Friends (view only) */
+.friends-list, .friends-log { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 6px; }
+.friends-list li { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.friends-log li { font-size: 0.85rem; color: var(--muted, inherit); }
+.friends-invite { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.friends-invite input { flex: 1 1 140px; min-width: 0; }
+.friends-code strong { letter-spacing: 0.1em; user-select: all; }

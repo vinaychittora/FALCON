@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Camera and microphone capture, published as one RTSP stream through MediaMTX.
 
 Camera Module 3 (rpicam-vid, hardware H.264 on a Pi 4), a USB webcam (V4L2)
@@ -23,6 +27,8 @@ from falcon_node.system import run
 
 log = logging.getLogger("falcon-node.media")
 STREAM_PATH = "falcon"
+# The microphone's own path (14 Nov 2026): a camera dropout never reopens the microphone.
+AUDIO_PATH = "falcon-audio"
 
 RESOLUTIONS = {
     "rpicam": ["1920x1080", "1536x864", "1280x720", "960x540"],
@@ -554,6 +560,24 @@ def build_pipeline(
     return commands
 
 
+def build_microphone_pipeline(
+    microphone: Microphone, settings: MicrophoneSettings, publish_url: str, ffmpeg: str = "ffmpeg",
+) -> list[list[str]]:
+    """The microphone alone, published on its own path: the same sound format as before
+    (mono AAC, 128 kbit/s, 48 kHz)."""
+    audio_filter = _audio_filter(settings.audio_channel) if microphone.channels > 1 else "anull"
+    # Its own process with a deep input queue: nothing else can hold the sound back,
+    # so the HAT's buffer never overflows (14 Nov: 8 % of the sound was lost while one
+    # process held audio back for unevenly arriving camera frames).
+    return [[
+        ffmpeg, "-hide_banner", "-loglevel", "warning", "-nostats", "-nostdin",
+        "-thread_queue_size", "8192", "-f", "alsa", "-channels", str(microphone.channels),
+        "-sample_rate", "48000", "-i", microphone.device,
+        "-map", "0:a:0", "-af", audio_filter, "-c:a", "aac", "-b:a", "128k", "-ar", "48000", "-ac", "1",
+        "-f", "rtsp", "-rtsp_transport", "tcp", publish_url,
+    ]]
+
+
 def redact(text: str) -> str:
     return re.sub(r"(rtsps?://)[^@/\s]+@", r"\1***@", text)
 
@@ -593,6 +617,21 @@ class Pipeline:
 
     def alive(self) -> bool:
         return bool(self.processes) and all(process.poll() is None for process in self.processes)
+
+    def exit_report(self) -> list[str]:
+        """One line per process that has stopped: program, exit code, uptime and its
+        last messages (credentials redacted)."""
+        uptime = time.monotonic() - self.started
+        lines = []
+        # A failed start leaves fewer processes than commands.
+        for command, process in zip(self.commands, self.processes, strict=False):
+            code = process.poll()
+            if code is None:
+                continue
+            program = Path(command[0]).name
+            last = " | ".join(list(self.errors)[-3:]) or "no messages"
+            lines.append(f"{program} exited with code {code} after {uptime:.0f} s: {last}")
+        return lines or ["the capture process stopped (no exit code)"]
 
     def stop(self, timeout: float = 5) -> None:
         for process in reversed(self.processes):
@@ -636,8 +675,12 @@ authInternalUsers:
     permissions:
       - action: publish
         path: {STREAM_PATH}
+      - action: publish
+        path: {AUDIO_PATH}
       - action: read
         path: {STREAM_PATH}
+      - action: read
+        path: {AUDIO_PATH}
       - action: api
   - user: falcon
     pass: {self.read_password}
@@ -645,6 +688,8 @@ authInternalUsers:
     permissions:
       - action: read
         path: {STREAM_PATH}
+      - action: read
+        path: {AUDIO_PATH}
 api: true
 apiAddress: 127.0.0.1:{self.api_port}
 metrics: false
@@ -661,6 +706,8 @@ srt: false
 moq: false
 paths:
   {STREAM_PATH}:
+    source: publisher
+  {AUDIO_PATH}:
     source: publisher
 """
 
@@ -686,13 +733,13 @@ paths:
             if line:
                 self.errors.append(redact(line)[:300])
 
-    def path_status(self) -> dict[str, Any] | None:
+    def path_status(self, path: str = STREAM_PATH) -> dict[str, Any] | None:
         import json
         import urllib.request
 
         try:
             with urllib.request.urlopen(
-                f"http://127.0.0.1:{self.api_port}/v3/paths/get/{STREAM_PATH}", timeout=2,
+                f"http://127.0.0.1:{self.api_port}/v3/paths/get/{path}", timeout=2,
             ) as response:
                 data = json.loads(response.read())
         except Exception:

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import type { CSSProperties } from "react";
 
 export type IconName =
@@ -34,6 +38,7 @@ export type IconName =
   | "filter"
   | "wifi"
   | "thermometer"
+  | "gauge"
   | "grid"
   | "list"
   | "keyboard"
@@ -42,7 +47,12 @@ export type IconName =
   | "focus"
   | "pause"
   | "menu"
-  | "map";
+  | "map"
+  | "search"
+  | "volume"
+  | "volumeOff"
+  | "chevronDown"
+  | "chevronLeft";
 const paths: Record<IconName, string> = {
   camera: "M14 7h-3L9 4H5L3 7H1v12h20V7h-4M15 13a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z",
   library: "M4 3v18M9 3v18M14 5l5-1 4 16-5 1-4-16Z",
@@ -78,6 +88,7 @@ const paths: Record<IconName, string> = {
   filter: "M3 5h18l-7 8v6l-4 2v-8L3 5Z",
   wifi: "M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0M12 19.5h.01",
   thermometer: "M14 14.8V4a2 2 0 1 0-4 0v10.8a4 4 0 1 0 4 0ZM12 9v7",
+  gauge: "M4.9 18a9 9 0 1 1 14.2 0M12 13l4-5M12 13h.01",
   grid: "M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z",
   list: "M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01",
   keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
@@ -87,6 +98,11 @@ const paths: Record<IconName, string> = {
   pause: "M8 5v14m8-14v14",
   menu: "M4 6h16M4 12h16M4 18h16",
   map: "M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2Zm0 0v14m6-12v14",
+  search: "m21 21-4.3-4.3M18 11a7 7 0 1 1-14 0 7 7 0 0 1 14 0Z",
+  volume: "M4 9v6h4l5 4V5L8 9H4Zm13 0a4 4 0 0 1 0 6m2.5-9a8 8 0 0 1 0 12",
+  volumeOff: "M4 9v6h4l5 4V5L8 9H4Zm13 1 4 4m0-4-4 4",
+  chevronDown: "m6 9 6 6 6-6",
+  chevronLeft: "m15 6-6 6 6 6",
 };
 
 export default function Icon({

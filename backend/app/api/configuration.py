@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Request
@@ -21,7 +25,9 @@ def put_config(body: AnalysisSettings, request: Request) -> AnalysisSettings:
     # A file analysis holds the lock too; only a live session may be restarted for new settings.
     if request.app.state.analyzer.lock.locked() and not observing:
         raise HTTPException(409, "Wait for the active job before changing saved settings")
-    atomic_json(request.app.state.config.data_dir / "settings.json", body.model_dump(mode="json"))
+    # Only the chosen settings are saved; the fixed tuning cannot be changed here.
+    atomic_json(request.app.state.config.data_dir / "settings.json", body.saved())
+    body = load_analysis_settings(request.app.state.config)
     if observing:
         # Settings are read when a session starts: restart the observed node's session
         # (a few seconds) so the new settings apply now, not at some later restart.

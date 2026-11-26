@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import hashlib
 import json
 from pathlib import Path
@@ -119,18 +123,3 @@ class BioCLIP:
         # The image embeddings of the last call, for the evidence log (re-grading later).
         self.last_features = embeddings
         return np.concatenate(results).astype(np.float32)
-
-
-class BioCLIPEnsemble:
-    def __init__(self, models: list[BioCLIP]):
-        if len(models) != 2 or len({model.spec.key for model in models}) != 2:
-            raise ValueError("The ensemble requires two distinct classifiers")
-        self.models = models
-
-    def prepare_taxa(self, taxa: TaxaCache, templates: list[str]) -> None:
-        for model in self.models:
-            model.prepare_taxa(taxa, templates)
-
-    def scores(self, crops: list[Image.Image]) -> dict[str, NDArray[np.float32]]:
-        # A failed model fails the call; a single surviving model cannot establish agreement.
-        return {model.spec.key: model.scores(crops) for model in self.models}

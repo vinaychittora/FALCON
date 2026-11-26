@@ -26,6 +26,7 @@ build:
 	bash -c 'source scripts/env.sh && cd frontend && npm run build'
 taxa:
 	bash -c 'source scripts/env.sh && python scripts/build_taxa.py $(ARGS)'
+	bash -c 'source scripts/env.sh && python -m app.taxonomy.groups data/taxa/rajasthan_taxa.json data/taxa/groups.json'
 handbooks:
 	bash -c 'source scripts/env.sh && python scripts/build_user_handbook.py && python hardware/handbook/build_handbook.py'
 benchmark:

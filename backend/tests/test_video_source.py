@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import threading
 
 import pytest
@@ -18,7 +22,7 @@ STATUS = {"stream": {"rtsp_port": 8554, "rtsp_path": "falcon", "audio": True}}
 def manager(tmp_path):
     db = Database(tmp_path / "f.sqlite3")
     store = NodeStore(db, CameraStore(db, tmp_path / "camera.key"))
-    store.save("falcon-node", "falcon-node", "http://192.168.1.60:8780", KEY)
+    store.save("falcon-node", "falcon-node", "http://falcon-node.test:8780", KEY)
     return NodeManager(store, None), store
 
 
@@ -26,20 +30,20 @@ def test_node_camera_is_the_default(tmp_path):
     nodes, store = manager(tmp_path)
     assert store.get("falcon-node").video_source == "node"
     request = nodes.live_request("falcon-node", AnalysisSettings(), STATUS)
-    assert request.url.get_secret_value() == "rtsp://192.168.1.60:8554/falcon" and request.audio_url is None
+    assert request.url.get_secret_value() == "rtsp://falcon-node.test:8554/falcon" and request.audio_url is None
 
 
 def test_ip_camera_picture_with_node_sound(tmp_path):
     nodes, store = manager(tmp_path)
     store.cameras.save(CameraProfileWrite(
-        name="Waterhole", url=SecretStr("rtsp://192.168.1.50:554/stream1"),
+        name="Waterhole", url=SecretStr("rtsp://camera.test:554/stream1"),
         username=SecretStr("admin"), password=SecretStr("secret"),
     ))
     store.update("falcon-node", video_source="ip")
     request = nodes.live_request("falcon-node", AnalysisSettings(), STATUS)
-    assert request.connection_url() == "rtsp://admin:secret@192.168.1.50:554/stream1"
+    assert request.connection_url() == "rtsp://admin:secret@camera.test:554/stream1"
     audio = request.audio_url.get_secret_value()
-    assert audio.startswith("rtsp://falcon:") and audio.endswith("@192.168.1.60:8554/falcon")
+    assert audio.startswith("rtsp://falcon:") and audio.endswith("@falcon-node.test:8554/falcon")
     assert request.config.audio_enabled is True
 
 

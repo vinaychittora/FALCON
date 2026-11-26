@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Optional Raspberry Pi extras that cost power and heat, switched on only when wanted.
 
 The node keeps only what it needs running. These extras are off by default and can be
@@ -13,6 +17,7 @@ and to start or stop bluetooth.service. install.sh grants exactly that through p
 """
 
 import logging
+import ipaddress
 import shutil
 from typing import Any
 
@@ -24,8 +29,8 @@ HOTSPOT = "falcon-hotspot"
 EXTRAS: dict[str, dict[str, str]] = {
     "hotspot": {
         "label": "Wi-Fi hotspot \"falcon\"",
-        "note": "For setting up the camera from a phone (http://10.42.0.1:8780/mobile). "
-                "Turning it off disconnects any phone using it.",
+        "note": "For setting up the camera from a phone. The address of the phone page appears "
+                "here once the hotspot is on. Turning it off disconnects any phone using it.",
     },
     "bluetooth": {
         "label": "Bluetooth",
@@ -39,6 +44,30 @@ def _lines(command: list[str]) -> list[str]:
     return result.stdout.splitlines() if result and result.returncode == 0 else []
 
 
+HOTSPOT_AFTER = " Turning it off disconnects any phone using it."
+
+
+def hotspot_address() -> str | None:
+    """The hotspot's own address as NetworkManager reports it (e.g. "10.42.0.1/24"), or None."""
+    for line in _lines(["nmcli", "-g", "IP4.ADDRESS", "connection", "show", HOTSPOT]):
+        text = line.strip().split("|")[0].split("/")[0]
+        try:
+            address = ipaddress.ip_address(text)
+        except ValueError:
+            continue
+        if address.version == 4:
+            return str(address)
+    return None
+
+
+def hotspot_note(on: bool) -> str:
+    """The phone page's address read at run time (only while the hotspot is on)."""
+    address = hotspot_address() if on else None
+    if address:
+        return f"For setting up the camera from a phone (http://{address}:8780/mobile)." + HOTSPOT_AFTER
+    return EXTRAS["hotspot"]["note"]
+
+
 def state(name: str) -> dict[str, Any]:
     """{available, on} for one extra."""
     if name == "hotspot":
@@ -46,7 +75,7 @@ def state(name: str) -> dict[str, Any]:
             return {"available": False, "on": False}
         available = HOTSPOT in _lines(["nmcli", "-t", "-f", "NAME", "connection", "show"])
         on = HOTSPOT in _lines(["nmcli", "-t", "-f", "NAME", "connection", "show", "--active"])
-        return {"available": available, "on": on}
+        return {"available": available, "on": on, "note": hotspot_note(on)}
     if name == "bluetooth":
         result = run(["systemctl", "is-active", "bluetooth.service"], timeout=10)
         enabled = run(["systemctl", "cat", "bluetooth.service"], timeout=10)

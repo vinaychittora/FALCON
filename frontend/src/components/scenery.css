@@ -1,0 +1,242 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
+/* System → Live status: "Scenery ignored", what FALCON holds back and where. */
+.sc-xp {
+  grid-column: 1 / -1;
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin: 4px 0;
+}
+.sc-xp > summary {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.sc-xp-t {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}
+.sc-xp-s {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.sc-xp {
+  container-type: inline-size;
+}
+/* Opened, the view takes the full width of System → Live status, so the picture is
+   large and no empty column is left beside it. */
+.live-system-group:has(.sc-xp[open]) {
+  grid-column: 1 / -1;
+}
+.sc-body {
+  display: grid;
+  gap: 16px;
+  padding: 4px 12px 12px;
+}
+/* The list sits beside the picture only when the card is wide enough for both;
+   otherwise it goes under it and the picture takes the card's full width. */
+@container (min-width: 1000px) {
+  .sc-body {
+    grid-template-columns: minmax(0, 960px) minmax(320px, 1fr);
+    align-items: start;
+  }
+}
+.sc-picture {
+  min-width: 0;
+  max-width: 960px;
+}
+.sc-frame {
+  position: relative;
+  width: 100%;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.sc-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.sc-nopic {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding: 16px;
+  text-align: center;
+  color: var(--media-text);
+  font-size: 14px;
+}
+.sc-spot {
+  position: absolute;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border: 2px dashed #cfd6cf;
+  border-radius: 2px;
+  background: transparent;
+  cursor: pointer;
+}
+.sc-spot.kind-maybe {
+  border-color: var(--certainty-probable);
+}
+.sc-spot.stale {
+  border-style: dotted;
+  opacity: 0.6;
+}
+.sc-spot.active,
+.sc-spot:focus-visible {
+  border-width: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.sc-num {
+  position: absolute;
+  left: -2px;
+  top: -2px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 2px 0 6px 0;
+  background: rgba(11, 16, 13, 0.85);
+  color: #f4faeb;
+  font: 600 12px/1 var(--mono);
+}
+/* The spot buttons are drawn at the size of the spot; a 44 px area keeps them easy to hit. */
+.sc-spot::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+.sc-picture-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.sc-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.sc-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-key-box {
+  display: inline-block;
+  width: 18px;
+  height: 12px;
+  border: 2px dashed #cfd6cf;
+}
+.sc-key-box.kind-maybe {
+  border-color: var(--certainty-probable);
+}
+.sc-key-box.stale {
+  border-style: dotted;
+  opacity: 0.6;
+}
+.sc-list-col {
+  min-width: 0;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+.sc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+.sc-row {
+  display: grid;
+  grid-template-columns: 28px 96px minmax(0, 1fr);
+  gap: 4px 12px;
+  align-items: start;
+  padding: 8px;
+  border: 1px solid var(--line-subtle);
+  border-radius: 8px;
+}
+.sc-row.active,
+.sc-row:focus {
+  border-color: var(--accent-fill);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--focus);
+}
+.sc-row-num {
+  font: 600 13px/1.6 var(--mono);
+  color: var(--ink);
+}
+.sc-crop {
+  width: 96px;
+  min-height: 48px;
+  max-height: 120px;
+  border-radius: 6px;
+  background-color: var(--media-surface);
+  background-repeat: no-repeat;
+}
+.sc-facts {
+  display: grid;
+  gap: 2px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.sc-kind {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.sc-stale {
+  color: var(--warning);
+  font-weight: 600;
+}
+.sc-forget {
+  grid-column: 3;
+  justify-self: start;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 14px;
+}
+.sc-note,
+.sc-rule,
+.sc-error {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.sc-error {
+  color: var(--danger);
+}

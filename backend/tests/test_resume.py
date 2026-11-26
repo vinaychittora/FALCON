@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import sqlite3
 import threading
 from collections.abc import Iterator
@@ -157,7 +161,7 @@ def test_pause_midframe_restart_and_resume_keep_settings_events_and_tracks(
 def test_empty_frame_checkpoint_and_atomic_storage_failure(tmp_path: Path) -> None:
     worker = runner(tmp_path)
     job = Job(job_id="frame-test", source_id="a" * 24, created_at="2026-01-01")
-    checkpoint = AnalysisCheckpoint(source_id=job.source_id, config=AnalysisSettings().model_dump())
+    checkpoint = AnalysisCheckpoint(source_id=job.source_id, config=AnalysisSettings(sample_fps=2).model_dump())
     worker.jobs.save_checkpoint(job, checkpoint)
     calls = []
     source = Mock()
@@ -168,7 +172,7 @@ def test_empty_frame_checkpoint_and_atomic_storage_failure(tmp_path: Path) -> No
         source,
         media(),
         job.job_id,
-        AnalysisSettings(),
+        AnalysisSettings(sample_fps=2),
         taxa(),
         Mock(detect=Mock(return_value=[])),
         Mock(),
@@ -204,7 +208,7 @@ def test_legacy_partial_boundary_keeps_review_and_fills_missing_box(tmp_path: Pa
         created_at="2026-01-01",
         status="cancelled",
         coverage_ms=67033,
-        analysis_config=AnalysisSettings().model_dump(),
+        analysis_config=AnalysisSettings(sample_fps=2).model_dump(),
     )
     worker.jobs.put(job)
     prior = event().model_copy(update={"timestamp_ms": 67000})
@@ -236,7 +240,7 @@ def test_audio_resume_skips_visual_and_deduplicates_legacy_stage(
         status="interrupted",
         coverage_ms=1000,
         audio_status="running",
-        analysis_config=AnalysisSettings().model_dump(),
+        analysis_config=AnalysisSettings(sample_fps=2).model_dump(),
     )
     worker.jobs.put(job)
     audio = AudioEvent(
@@ -272,7 +276,7 @@ def test_resume_busy_changed_source_taxa_and_restart(tmp_path: Path) -> None:
     job = Job(job_id="resume-test", source_id="a" * 24, created_at="2026-01-01", status="running")
     checkpoint = AnalysisCheckpoint(
         source_id=job.source_id,
-        config=AnalysisSettings().model_dump(),
+        config=AnalysisSettings(sample_fps=2).model_dump(),
         size_bytes=path.stat().st_size,
         mtime_ns=path.stat().st_mtime_ns,
         taxa_version="test",
@@ -353,7 +357,7 @@ def test_failed_audio_remains_resumable_and_keeps_completed_visual_work(
     monkeypatch.setattr(
         "app.services.analyzer.BirdNET", Mock(return_value=Mock(analyze=audio))
     )
-    job = worker.start(path, video, AnalysisSettings())
+    job = worker.start(path, video, AnalysisSettings(sample_fps=2))
     failed = finished(worker, job)
     assert failed.status == "failed" and failed.audio_status == "failed"
     checkpoint = worker.jobs.checkpoint(job.job_id)

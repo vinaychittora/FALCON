@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Bounded source-packet retention and asynchronous five-second video evidence.
 
 Capture never waits for encoding or inference. Pins retain the relevant GOP and
@@ -26,11 +30,14 @@ import numpy as np
 from app.inference.privacy import redact_yuv420
 from app.media.base import Frame
 from app.media.crop import crop_frame
+from app.media.stay_recording import LongRecording, RecordingResult
 from app.schemas import BBox
 
 Result = dict[str, Any]
 # Codecs whose every frame stands alone (a node passing its webcam's MJPEG through).
 INTRA_ONLY = frozenset({"mjpeg"})
+# Shown until the new timeline holds a full clip again, then cleared.
+TIMESTAMP_FAULT = "Camera timestamps changed; clips resume in a few seconds."
 
 
 @dataclass(frozen=True)
@@ -143,9 +150,13 @@ class EvidenceRecorder:
         self._recent_ids: deque[str] = deque()
         self._closed = False
         self._last_dts: float | None = None
+        self._rebased_at: float | None = None
+        self._timestamp_resets = 0
         self._counts = {"ready": 0, "partial": 0, "failed": 0}
         self._fault = ""
         self._status = "waiting for stream"
+        # Stay recordings being written, with the stream generation they belong to.
+        self._recordings: list[tuple[str, LongRecording]] = []
         self._tasks: queue.Queue[_Pin | None] = queue.Queue(maxsize=max_pins + 1)
         self._worker = threading.Thread(target=self._work, name="falcon-evidence", daemon=True)
         self._worker.start()
@@ -179,7 +190,9 @@ class EvidenceRecorder:
                 uuid4().hex, str(context.name), bytes(context.extradata or b""), rate
             )
             self._generation = generation
-            self._last_dts = None
+            self._last_dts = self._rebased_at = None
+            if self._fault == TIMESTAMP_FAULT:
+                self._fault = ""  # a fresh connection starts a fresh timeline
             if self._closed:
                 self._status = "stopped"
             elif generation.codec not in {"h264", "hevc", *INTRA_ONLY}:
@@ -189,10 +202,44 @@ class EvidenceRecorder:
                 self._status = "buffering"
             return generation.identity
 
+    def start_recording(
+        self, start_s: float, path: Path, on_done: Callable[[LongRecording, RecordingResult], None],
+        *, crop: tuple[float, float] = (0.0, 0.0), greyscale: bool = False,
+    ) -> LongRecording | None:
+        """A continuous recording from source time start_s (pre-roll from the ring)
+        until finish(); None when no stream is buffering."""
+        with self._lock:
+            generation = self._generation
+            if self._closed or generation is None or self._status != "buffering":
+                return None
+
+            def done(recording: LongRecording, result: RecordingResult) -> None:
+                with self._lock:
+                    self._recordings = [(g, r) for g, r in self._recordings if r is not recording]
+                on_done(recording, result)
+
+            recording = LongRecording(
+                path, generation.codec, generation.extradata, generation.rate, start_s, done,
+                crop=crop, greyscale=greyscale,
+            )
+            packets = list(self._ring)
+            before = [i for i, p in enumerate(packets) if p.keyframe and p.presentation_time <= start_s]
+            after = [i for i, p in enumerate(packets) if p.keyframe]
+            first = before[-1] if before else (after[0] if after else len(packets))
+            for packet in packets[first:]:
+                recording.feed(packet)
+            self._recordings.append((generation.identity, recording))
+        recording.start()
+        return recording
+
     def end_generation(self) -> None:
         with self._lock:
             generation = self._generation
             self._generation = None
+            # The stream ended or restarted: recordings end with what they received.
+            for identity, recording in self._recordings:
+                if generation and identity == generation.identity:
+                    recording.finish(None)
             while self._ring:
                 self._drop(self._ring.popleft())
             if generation:
@@ -238,16 +285,30 @@ class EvidenceRecorder:
             if self._last_dts is not None and (
                 copy.time < self._last_dts - 0.5 or copy.time > self._last_dts + 5
             ):
-                self._fault = "Camera timestamps changed; a new evidence capture interval started."
+                # The node's stream restarted under the same connection (or its clock
+                # stepped): start a new timeline. Clips resume once it holds a full clip.
+                self._fault = TIMESTAMP_FAULT
+                self._timestamp_resets += 1
                 self.end_generation()
                 generation = _Generation(
                     uuid4().hex, generation.codec, generation.extradata, generation.rate,
                 )
                 self._generation = generation
                 self._status = "buffering"
+                self._rebased_at = copy.time
+            elif (
+                self._rebased_at is not None
+                and copy.time - self._rebased_at >= self.pre_seconds + self.post_seconds
+            ):
+                self._rebased_at = None
+                if self._fault == TIMESTAMP_FAULT:
+                    self._fault = ""
             self._last_dts = copy.time
             self._ring.append(copy)
             self._hold(copy)
+            for identity, recording in self._recordings:
+                if identity == generation.identity:
+                    recording.feed(copy)
             for pin in self._pins.values():
                 if pin.generation.identity != generation.identity or pin.sealed:
                     continue
@@ -361,11 +422,16 @@ class EvidenceRecorder:
             if self._closed:
                 return
             self._closed = True
+            recordings = [recording for _, recording in self._recordings]
+            for recording in recordings:
+                recording.finish(None)
             self.end_generation()
             for identity in list(self._pins):
                 self.release(identity)
             self._status = "stopped"
             self._tasks.put_nowait(None)
+        for recording in recordings:
+            recording.join(60)
         if threading.current_thread() is not self._worker:
             self._worker.join()
 
@@ -379,6 +445,7 @@ class EvidenceRecorder:
                 "evidence_partial_clips": self._counts["partial"],
                 "evidence_failed_clips": self._counts["failed"],
                 "evidence_recording_fault": self._fault,
+                "evidence_timestamp_resets": self._timestamp_resets,
             }
 
     @staticmethod
@@ -394,6 +461,8 @@ class EvidenceRecorder:
             self._counts[result["status"]] += 1
             if result["status"] == "failed":
                 self._fault = result["message"]
+            elif result["status"] == "ready":
+                self._fault = ""  # clips are being saved again
         try:
             self.on_complete(identity, result)
         except Exception:

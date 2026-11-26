@@ -37,7 +37,7 @@ GET /api/exports/camtrap-dp?captured_from=2026-10-01T00:00:00Z&captured_to=2026-
 | --- | --- | --- |
 | `datapackage.json` | | Profile, title, contact, license, project (opportunistic, activity detection, event-level), spatial (site point), temporal (dates), taxonomic list with iNaturalist taxon IDs and English names |
 | `deployments.csv` | Live session | Start and end, site latitude/longitude and uncertainty, camera or node name, `timestampIssues` when the computer clock was not synchronized |
-| `media.csv` + `media/` | Saved clip | 10-second MP4 video clips and WAV sound clips, `captureMethod=activityDetection`, `filePublic=false`, SHA-256 and duration in `exifData` |
+| `media.csv` + `media/` | Saved recording | MP4 recordings of each stay (with the microphone sound, in parts of at most 10 minutes) and WAV sound records, `captureMethod=activityDetection`, `filePublic=false`, SHA-256 and duration in `exifData` |
 | `observations.csv` | Animal visit | Event-level observation: one per visual track (all its frames) or per sound detection |
 | `falcon_observations.csv` | Analyzed frame or sound window | FALCON detail: bounding box, detector confidence, visual similarity, original prediction, review and the weather reading at that moment |
 | `environment.csv` | Weather reading | Temperature °C, humidity %, pressure hPa, rain-plate wet/dry, quality flag, node and server times |

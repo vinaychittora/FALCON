@@ -1,11 +1,16 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Opt-in phone access on the home network, protected by an access code.
 
 FALCON normally answers only this computer. When "phone access on home Wi-Fi" is on,
 a device on the local network may use it after typing the access code once; the
 browser then keeps an HttpOnly, SameSite=Strict cookie derived from the code, so a
 new code signs every phone out. Only private IP addresses are accepted as the host
-name, plus this computer's own name ("falcon-pc", "falcon-pc.local"); no other DNS name,
-so DNS rebinding cannot reach it. Requests from other web sites are refused. Uploads, remote-access and phone-access management stay on this
+name, plus this computer's own name ("falcon-pc", "falcon-pc.local") and the fixed names the
+home DNS gives it (lan_names in the config: falcon.lan, falcon.home.arpa); no other DNS
+name, so DNS rebinding cannot reach it. Requests from other web sites are refused. Uploads, remote-access and phone-access management stay on this
 computer.
 """
 
@@ -56,9 +61,13 @@ def private_ip(value: str) -> bool:
 
 
 class LanAccessService:
-    def __init__(self, data_dir: Path, port: int = 8000):
+    def __init__(self, data_dir: Path, port: int = 8000, names: tuple[str, ...] | list[str] = ()):
         self.path = data_dir / "private" / "lan-access.json"
         self.port = port
+        # Fixed names the home DNS (Pi-hole) points at this computer, e.g. falcon.lan.
+        cleaned = [name.strip().lower().rstrip(".") for name in names]
+        self.name_order = [n for n in cleaned if all(HOSTNAME.fullmatch(part) for part in n.split("."))]
+        self.names = frozenset(self.name_order)
         self.lock = threading.RLock()
         self.failures = 0
         self.locked_until = 0.0
@@ -119,7 +128,7 @@ class LanAccessService:
         """
         checked, cached = self._names
         if time.monotonic() - checked < 300:
-            return cached
+            return cached | self.names
         name = ""
         windows_hostname = shutil.which("hostname.exe")
         try:
@@ -133,13 +142,17 @@ class LanAccessService:
         name = (name or socket.gethostname()).strip().lower()
         names = frozenset({name, f"{name}.local"}) if HOSTNAME.fullmatch(name) else frozenset()
         self._names = (time.monotonic(), names)
-        return names
+        return names | self.names
 
     def status(self) -> dict[str, Any]:
         config = self._config
         return {
             "enabled": config["enabled"], "code": config["code"],
-            "addresses": [f"http://{address}:{self.port}" for address in self.addresses()]
+            # The home-DNS name first (no port: Windows forwards port 80 too), then the
+            # same with the port, the numbers, and the .local name.
+            "addresses": [f"http://{name}" for name in self.name_order[:1]]
+            + [f"http://{name}:{self.port}" for name in self.name_order[:1]]
+            + [f"http://{address}:{self.port}" for address in self.addresses()]
             + [f"http://{name}:{self.port}" for name in sorted(self.hostnames()) if name.endswith(".local")],
         }
 

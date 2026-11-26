@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import time
 from collections import deque
 from collections.abc import Callable
@@ -25,6 +29,35 @@ from app.taxonomy.inaturalist import TaxaCache
 
 class Cancelled(Exception):
     pass
+
+
+# A fainter second animal (since 14 Nov 2026): on 13 Nov a second
+# bird beside a Magpie-Robin got a box in only 6 of ~200 frames at the 0.50 floor. A box
+# from SECOND_BOX_FLOOR up is kept when a confident animal box is in the same frame
+# within SECOND_BOX_NEAR (fraction of the picture); all visit rules still apply to it.
+SECOND_BOX_FLOOR = 0.35
+SECOND_BOX_NEAR = 0.3
+
+
+def second_boxes(proposals: list[Proposal], threshold: float) -> list[Proposal]:
+    """Proposals at the threshold, plus fainter animal boxes next to a confident one."""
+    # A proposal without a score (motion blobs, test doubles) passes as before.
+    strong = [p for p in proposals if p.score is None or p.score >= threshold]
+    anchors = [p.bbox for p in strong if p.label == "animal"]
+
+    def near(box: BBox) -> bool:
+        cx, cy = (box[0] + box[2]) / 2, (box[1] + box[3]) / 2
+        return any(
+            ((cx - (a[0] + a[2]) / 2) ** 2 + (cy - (a[1] + a[3]) / 2) ** 2) ** 0.5 <= SECOND_BOX_NEAR
+            for a in anchors
+        )
+
+    faint = [
+        p for p in proposals
+        if p.label == "animal" and p.score is not None and SECOND_BOX_FLOOR <= p.score < threshold
+        and near(p.bbox)
+    ]
+    return strong + faint
 
 
 class CropBudget:
@@ -172,9 +205,10 @@ def visual_pipeline(
                     motion = MotionDetector()
                 cuts += 1
             tick = time.perf_counter()
-            proposals = detect_regions(
-                detector, region, config.detector_threshold, config.small_animal_mode, cancel.is_set
-            )
+            proposals = second_boxes(detect_regions(
+                detector, region, min(config.detector_threshold, SECOND_BOX_FLOOR),
+                config.small_animal_mode, cancel.is_set,
+            ), config.detector_threshold)
             detector_seconds += time.perf_counter() - tick
             if motion:
                 # A walking person or moving vehicle also creates a motion blob. Drop
@@ -200,14 +234,13 @@ def visual_pipeline(
                     (roi_top + d * (roi_bottom - roi_top)) / frame_height,
                 )
 
-            # People are never observations. Their boxes are reported so previews,
-            # review images and clips can mask them (unless masking is switched off),
-            # then they leave the pipeline.
-            people = (
-                [to_frame(p.bbox) for p in proposals if is_person(p.label)] if config.mask_people else []
-            )
+            # People are never observations. Their boxes are always reported (the live
+            # service masks previews and clips when masking is on, and pauses the
+            # friends' picture either way); review images are masked here when on.
+            seen_people = [to_frame(p.bbox) for p in proposals if is_person(p.label)]
+            people = seen_people if config.mask_people else []
             if frame_people is not None:
-                frame_people(frame, people)
+                frame_people(frame, seen_people)
             proposals = deduplicate(
                 [p for p in proposals if config.log_non_wildlife or p.label in {"animal", "motion"}]
             )[: config.max_proposals]

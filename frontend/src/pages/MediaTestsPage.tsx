@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import {
@@ -22,7 +26,6 @@ import { uploadMedia } from "../api/upload";
 import AnalysisActions from "../components/AnalysisActions";
 import AudioPlayer from "../components/AudioPlayer";
 import Icon from "../components/Icon";
-import { HelpLink } from "./HelpPage";
 import ImagePlayer from "../components/ImagePlayer";
 import Inspector from "../components/Inspector";
 import ObservationHistory from "../components/ObservationHistory";
@@ -387,9 +390,6 @@ export default function MediaTestsPage({
     <div className="page media-page">
       <header className="page-header">
         <div>
-          <h1>
-            Media tests <HelpLink slug="user-guide" section="media-tests" />
-          </h1>
           <p>
             Try FALCON on a photo, video or sound recording. Test runs are
             temporary and never mix with field observations.

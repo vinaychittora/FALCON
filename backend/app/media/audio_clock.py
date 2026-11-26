@@ -1,4 +1,10 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Receive/sample clock for live PCM when demuxer presentation timestamps jump."""
+
+from collections import deque
 
 
 class AudioReceiveClock:
@@ -23,9 +29,15 @@ class AudioReceiveClock:
         self.last_gap_coverage_ms = 0.0
         self.shortfalls = 0
         self.last_shortfall_ms = 0.0
+        # The source's real rate (samples per second of receive time) over the last
+        # minute: 14 Nov the audio HAT ran at 44,297 instead of 48,000 after a quick
+        # restart, which put a 0.75 s hole in every 9 s of saved sound.
+        self._rate_marks: deque[tuple[float, int]] = deque()
+        self.measured_rate = 0.0
         self.begin_connection()
 
     def begin_connection(self) -> None:
+        self._rate_marks = deque()
         self._last_received: float | None = None
         self._previous_end_pts: float | None = None
         self._format: tuple[int, str] | None = None
@@ -89,7 +101,30 @@ class AudioReceiveClock:
         self._format = (sample_rate, format_key)
         self.sample_rate = sample_rate
         self.decoded_samples += samples
+        if reset:
+            self._rate_marks.clear()
+        self._rate_marks.append((received, self.decoded_samples))
+        while self._rate_marks and received - self._rate_marks[0][0] > 60:
+            self._rate_marks.popleft()
+        first_at, first_count = self._rate_marks[0]
+        if received - first_at >= 30:
+            self.measured_rate = (self.decoded_samples - first_count) / (received - first_at)
         return reset
+
+    def rate_fault(self) -> str:
+        """A warning when the source delivers more than 1 % off its declared rate."""
+        if not self.sample_rate or not self.measured_rate:
+            return ""
+        if abs(self.measured_rate - self.sample_rate) / self.sample_rate <= 0.01:
+            return ""
+        # Whole percent only, so the text (a hover tooltip on Live) does not change with
+        # every measurement and make the tooltip blink.
+        off = round(abs(self.measured_rate - self.sample_rate) / self.sample_rate * 100)
+        return (
+            f"Sound arrives about {off} % {'slower' if self.measured_rate < self.sample_rate else 'faster'} "
+            "than this computer's clock expects. Usually that clock is off (the clock check "
+            "on System compares it with the sensor node); recorded times are off with it."
+        )
 
     def metrics(self) -> dict[str, int | float | str]:
         return {
@@ -103,6 +138,8 @@ class AudioReceiveClock:
             "audio_last_gap_receive_ms": self.last_gap_receive_ms,
             "audio_last_gap_coverage_ms": self.last_gap_coverage_ms,
             "audio_sample_shortfalls": self.shortfalls,
+            "audio_measured_rate": round(self.measured_rate),
+            "audio_rate_fault": self.rate_fault(),
             "audio_last_shortfall_ms": self.last_shortfall_ms,
             "audio_clock": "decoded samples anchored to receive time; demuxer PTS diagnostic only",
         }

@@ -1,4 +1,9 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import type { Detection, VisualEvent, AudioEvent } from "../types";
+import { UNIDENTIFIED_SOUND, unidentifiedSound } from "./certainty";
 import {
   correctedNames,
   scientificSubtitle,
@@ -74,8 +79,10 @@ export const displayLabel = (e: Detection, taxa?: TaxonNameIndex) =>
       : e.review.status === "false_positive"
         ? "False positive · reviewed"
         : e.review.status === "discarded"
-          ? `${predictionLabel(e)} · discarded`
-          : predictionLabel(e);
+          ? `${unidentifiedSound(e) ? UNIDENTIFIED_SOUND : predictionLabel(e)} · discarded`
+          : unidentifiedSound(e)
+            ? UNIDENTIFIED_SOUND
+            : predictionLabel(e);
 
 /** Scientific subtitle only when it adds information to the primary label. */
 export const displayScientificName = (
@@ -83,6 +90,7 @@ export const displayScientificName = (
   taxa?: TaxonNameIndex,
 ) => {
   if (["unknown", "false_positive"].includes(event.review.status)) return null;
+  if (unidentifiedSound(event)) return null;
   const scientific =
     event.review.status === "corrected"
       ? correctedNames(event, taxa).scientific

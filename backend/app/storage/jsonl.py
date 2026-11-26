@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """SQLite observations and review audit with backward-compatible JSONL exports."""
 
 import fcntl
@@ -26,6 +30,7 @@ from app.storage.jobs import AnalysisCheckpoint, now
 from app.storage.lifecycle import lifecycle_lock
 from app.storage.observation_context import capture_time_sql, enrich_events, origin_sql, tables
 
+RODENT_LABEL = "Rat or mouse at night"  # app.services.rodents.LABEL (kept here: no import cycle)
 adapter: TypeAdapter[Event] = TypeAdapter(Event)  # type: ignore[arg-type]
 # Visual similarity or acoustic confidence, for minimum-score filters.
 SCORE_SQL = "COALESCE(json_extract(e.payload,'$.classification.score'), json_extract(e.payload,'$.confidence'))"
@@ -56,12 +61,145 @@ RESOLVED_SQL = (
     "(CASE WHEN json_extract(e.payload,'$.visit_id') IS NULL OR e.modality!='visual' "
     f"THEN NOT {UNRESOLVED_SQL} "
     f"ELSE e.review_status!='unreviewed' OR COALESCE({VISIT_HIDDEN_SQL}, 'CANDIDATE') "
-    "NOT IN ('STILL','UNIDENTIFIED','SMALL','CANDIDATE','INSECT_NIGHT') END)"
+    "NOT IN ('STILL','UNIDENTIFIED','SMALL','CANDIDATE','INSECT_NIGHT','RODENT_NIGHT') END)"
 )
 GLIMPSE_SQL = (
     "MIN(e.modality)='visual' AND ((MAX(json_extract(e.payload,'$.visit_id')) IS NULL AND COUNT(*)=1) "
     f"OR COALESCE(MAX({VISIT_HIDDEN_SQL}), '')='GLIMPSE')"
 )
+# A visit or bout kept with Confirm, Correct or Unsure (25 Nov: 64 of the verified
+# one-frame visits were behind "Show hidden"). Lists, counts and the Species search never
+# hide it by a system rule; Discard and Not an animal stay as they were. Every other rule
+# already lets a reviewed record through (RESOLVED_SQL, SOUND_PROBABLE_SQL); the Hidden
+# status, "attached" rows and the 7-day clearing (retention.hidden_due) only ever look at
+# unreviewed groups, so they do not change.
+KEPT_BY_HIM_SQL = "COALESCE(MAX(e.review_status IN ('correct','corrected','unknown')), 0)=1"
+# The glimpse rule as lists and counts apply it ("hide_glimpses"): never on a kept visit.
+LIST_GLIMPSE_SQL = f"({GLIMPSE_SQL}) AND NOT ({KEPT_BY_HIM_SQL})"
+# The final name on a confirmed or corrected record, common and scientific: the corrected
+# names after Correct, the record's own named species after Confirm (picture or sound).
+FINAL_NAME_SQL = (
+    "(CASE WHEN e.review_status='corrected' THEN "
+    "COALESCE(json_extract(e.payload,'$.review.corrected_common_name'),'') || ' ' || "
+    "COALESCE(json_extract(e.payload,'$.review.corrected_scientific_name'),'') "
+    "WHEN e.modality='visual' THEN "
+    "COALESCE(json_extract(e.payload,'$.classification.common_name'),'') || ' ' || "
+    "COALESCE(json_extract(e.payload,'$.classification.scientific_name'),'') "
+    "ELSE COALESCE(json_extract(e.payload,'$.common_name'),'') || ' ' || "
+    "COALESCE(json_extract(e.payload,'$.scientific_name'),'') END)"
+)
+# Hidden records never reviewed are cleared this many days after capture (since 24 Nov
+# 2026); retention does it, Review shows what is due.
+HIDDEN_CLEAR_DAYS = 7
+# "Unidentified only" (since 24 Nov 2026, as the model misses many): unreviewed pictures with no
+# species yet, hidden or not, so they can be named by hand. A visit goes by its counted name;
+# an old record without a visit by its own classification. Night insects and rats stay out.
+UNIDENTIFIED_SQL = (
+    "(e.modality='visual' AND e.review_status='unreviewed' AND "
+    "CASE WHEN json_extract(e.payload,'$.visit_id') IS NULL "
+    "THEN json_extract(e.payload,'$.classification.status')='unknown' "
+    "ELSE (SELECT json_extract(v.payload,'$.taxon_id') IS NULL "
+    "AND COALESCE(v.hidden_reason,'') NOT IN ('INSECT_NIGHT','RODENT_NIGHT') "
+    "FROM visits v WHERE v.visit_id=json_extract(e.payload,'$.visit_id')) END)"
+)
+# Sound Likely bar: the same rule as frontend/src/api/certainty.ts audioCertainty (SOUND_LIKELY):
+# Likely at a best BirdNET confidence of 0.60 or more unless the cleaned pass disagrees.
+SOUND_LIKELY = 0.6
+# A Probable sound bout (since 23 Nov 2026, against false positives): unreviewed, best confidence
+# under SOUND_LIKELY, or every cleaned verdict "does not agree". Decided per bout, so a listed
+# bout keeps all its records. With resolved_only it goes behind "Show hidden"; nothing is dropped.
+# An unidentified sound (24 Nov: a bird not recorded in Rajasthan, inference/sound_list.py) is
+# hidden the same way, whatever its confidence.
+SOUND_PROBABLE_SQL = (
+    "MIN(e.modality)='audio' AND MAX(e.modality)='audio' AND MAX(e.review_status!='unreviewed')=0 AND ("
+    f"COALESCE(MAX(json_extract(e.payload,'$.confidence')), 0) < {SOUND_LIKELY} OR ("
+    "COUNT(json_extract(e.payload,'$.cleaned_agrees')) > 0 AND "
+    "MAX(COALESCE(json_extract(e.payload,'$.cleaned_agrees'), 0)) = 0) OR "
+    "MAX(COALESCE(json_extract(e.payload,'$.outside_area'), 0)) = 1)"
+)
+# THE hidden rule for one visit or bout (GROUP BY ENCOUNTER_KEY_SQL): no record passes the
+# default filter, or a glimpse, or a Probable or unidentified sound bout. Review's Hidden
+# status, "Show hidden (N)" and the 7-day clearing (services/retention.py) all use it.
+HIDDEN_GROUP_SQL = f"(MAX({RESOLVED_SQL})=0 OR ({GLIMPSE_SQL}) OR ({SOUND_PROBABLE_SQL}))"
+# THE stay (since 24 Nov 2026, one card per stay): the animals of one footage. Only a picture
+# visit FALCON shows in front (a visit row with no hidden kind) ties video recordings into
+# one stay, transitively; no verdict looks in, so a row never moves under the reviewer's decisions.
+# Anything else (any hidden kind, known or new, and an old group without a visit row) ties
+# nothing (a stuck night-insect track once spanned 131 videos and three hours): it sits on
+# the stay of its earliest video that holds a visit in front, or else on the card of its
+# earliest video, with every such visit whose earliest video is the same. A visit without a
+# video, and every sound bout, is a stay of its own. Links exist from the moment a recording
+# starts and stay when its file is removed. A stay's id is its earliest video holding a
+# visit in front (capture time, then id), or that one earliest video.
+# One pass: every picture record linked to a video, with its visit and video.
+STAY_LINKS_SQL = (
+    f"SELECT {ENCOUNTER_KEY_SQL} AS k, l.evidence_id AS video, COALESCE(v.captured_at, '~') AS at, "
+    "json_extract(e.payload, '$.visit_id') AS visit_id "
+    "FROM evidence v JOIN evidence_links l ON l.evidence_id = v.evidence_id "
+    "JOIN observations e ON e.event_id = l.event_id "
+    "WHERE json_extract(v.payload, '$.media_kind') = 'video' AND e.modality = 'visual'"
+)
+
+
+def stays(connection: sqlite3.Connection) -> tuple[dict[str, str], dict[str, list[str]], dict[str, int]]:
+    """({visit key: stay id}, {stay id: visit keys}, {stay id: recordings}) for every picture
+    visit linked to a video, built from the links and stored kinds at this moment (a
+    union-find, no cache). Recordings are the stay's videos that hold a visit in front (one
+    for a card of visits that tie nothing)."""
+    available = tables(connection)
+    if not {"evidence_links", "evidence", "visits"} <= available:
+        return {}, {}, {}
+    parent: dict[tuple[str, str], tuple[str, str]] = {}
+
+    def find(node: tuple[str, str]) -> tuple[str, str]:
+        parent.setdefault(node, node)
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    kinds = {row[0]: row[1] or "" for row in connection.execute("SELECT visit_id, hidden_reason FROM visits")}
+    videos: dict[str, set[tuple[str, str]]] = {}
+    visit_of: dict[str, str] = {}
+    for key, video, at, visit_id in connection.execute(STAY_LINKS_SQL).fetchall():
+        videos.setdefault(key, set()).add((at, video))
+        if visit_id:
+            visit_of.setdefault(key, visit_id)
+    # In front: a visit row with no hidden kind. No verdict looks in, so a stay never moves
+    # under the reviewer's decisions.
+    animal = {key for key in videos if key in visit_of and kinds.get(visit_of[key]) == ""}
+    animal_video: dict[str, tuple[str, str]] = {}
+    others: dict[str, list[tuple[str, str]]] = {}
+    for key, marks in videos.items():
+        if key not in animal:
+            others[key] = list(marks)
+            continue
+        for at, video in marks:
+            animal_video[video] = (at, video)
+            a, b = find(("v", key)), find(("e", video))
+            if a != b:
+                parent[a] = b
+    earliest: dict[tuple[str, str], tuple[str, str]] = {}
+    for video, mark in animal_video.items():
+        root = find(("e", video))
+        if root not in earliest or mark < earliest[root]:
+            earliest[root] = mark
+    stay_of = {key: earliest[find(("v", key))][1] for key in animal if find(("v", key)) in earliest}
+    recordings: dict[str, int] = {}
+    for video in animal_video:
+        stay = earliest[find(("e", video))][1]
+        recordings[stay] = recordings.get(stay, 0) + 1
+    for key, places in others.items():
+        ordered = sorted(places)
+        home = next((video for _, video in ordered if video in animal_video), None)
+        # Ties nothing: the stay of its earliest video that holds a visit in front, else the
+        # card of its earliest video (shared with every such visit whose earliest is the same).
+        stay_of[key] = earliest[find(("e", home))][1] if home is not None else ordered[0][1]
+        recordings.setdefault(stay_of[key], 1)
+    members: dict[str, list[str]] = {}
+    for key, stay in stay_of.items():
+        members.setdefault(stay, []).append(key)
+    return stay_of, members, recordings
 
 
 def _captured(first: Event, enriched: Event) -> str | None:
@@ -75,6 +213,26 @@ def _captured(first: Event, enriched: Event) -> str | None:
     )
     return (datetime.fromisoformat(enriched.captured_at) - timedelta(milliseconds=offset)).isoformat()
 logger = logging.getLogger(__name__)
+
+
+# Review, simplified 16 Nov 2026: Confirmed includes corrected, and Discarded
+# includes the old "not an animal" (the stored reason is kept, only the filter merges).
+STATUS_GROUPS = {
+    "confirmed": ("correct", "corrected"),
+    "discarded": ("discarded", "false_positive"),
+}
+
+
+def status_condition(
+    conditions: list[str], parameters: list[Any], review_status: str | None, include_discarded: bool,
+) -> None:
+    if review_status:
+        group = STATUS_GROUPS.get(review_status, (review_status,))
+        conditions.append(f"e.review_status IN ({','.join('?' * len(group))})")
+        parameters.extend(group)
+    elif not include_discarded:
+        # Discarded records stay in the audit trail but leave the working archive.
+        conditions.append("e.review_status NOT IN ('discarded','false_positive')")
 
 
 def normalize(value: str) -> str:
@@ -143,8 +301,17 @@ def _index_terms(connection: sqlite3.Connection, event: Event) -> None:
     )
 
 
+def _purged(connection: sqlite3.Connection, event_id: str) -> bool:
+    try:
+        return connection.execute("SELECT 1 FROM purged_events WHERE event_id=?", (event_id,)).fetchone() is not None
+    except sqlite3.OperationalError:
+        return False  # a database from before the table existed
+
+
 def _insert(connection: sqlite3.Connection, event: Event, recorded_at: str) -> bool:
     timestamp = event.timestamp_ms if event.modality == "visual" else event.start_ms
+    if _purged(connection, event.event_id):
+        return False  # removed on purpose; its mirror line must not bring it back
     cursor = connection.execute(
         "INSERT OR IGNORE INTO observations VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
@@ -280,10 +447,11 @@ class EventStore:
                                     f"{path.name}:{number}:{line.rstrip(chr(10))}".encode()
                                 ).hexdigest()
                             )
-                            connection.execute(
-                                "INSERT OR IGNORE INTO review_audit VALUES (?, ?, ?, ?)",
-                                (audit_id, item["event_id"], recorded_at, line.rstrip("\n")),
-                            )
+                            if not _purged(connection, item["event_id"]):
+                                connection.execute(
+                                    "INSERT OR IGNORE INTO review_audit VALUES (?, ?, ?, ?)",
+                                    (audit_id, item["event_id"], recorded_at, line.rstrip("\n")),
+                                )
                         else:
                             event = adapter.validate_json(line)
                             if self.path(event.source_id).name != path.name:
@@ -430,15 +598,12 @@ class EventStore:
         for column, value in (
             ("source_id", source_id),
             ("job_id", job_id),
-            ("review_status", review_status),
             ("modality", modality),
         ):
             if value:
                 conditions.append(f"e.{column}=?")
                 parameters.append(value)
-        if not include_discarded and review_status != "discarded":
-            # Discarded records stay in the audit trail but leave the working archive.
-            conditions.append("e.review_status!='discarded'")
+        status_condition(conditions, parameters, review_status, include_discarded)
         if min_score is not None:
             conditions.append(f"{SCORE_SQL}>=?")
             parameters.append(min_score)
@@ -503,7 +668,7 @@ class EventStore:
         self, connection: sqlite3.Connection, *, source_id: str | None, scope: Literal["live", "all"],
         review_status: str | None, modality: str | None, captured_from: datetime | None,
         captured_to: datetime | None, min_score: float | None, include_discarded: bool, q: str | None,
-        resolved_only: bool = False,
+        resolved_only: bool = False, keep_not_animal: bool = False,
     ) -> tuple[list[str], list[Any]]:
         available = tables(connection)
         conditions: list[str] = []
@@ -516,11 +681,11 @@ class EventStore:
                 parameters.append(value)
         if review_status == "mixed":
             review_status = None
-        if review_status:
-            conditions.append("e.review_status=?")
-            parameters.append(review_status)
-        elif not include_discarded:
+        if keep_not_animal and not review_status and not include_discarded:
+            # The Summary counts the old "not an animal" itself (its own column).
             conditions.append("e.review_status!='discarded'")
+        else:
+            status_condition(conditions, parameters, review_status, include_discarded)
         if scope == "live":
             conditions.append(f"({origin_sql(available)})='live'")
         if min_score is not None:
@@ -532,8 +697,18 @@ class EventStore:
                 parameters.append(moment.astimezone(UTC).isoformat())
         search = normalize((q or "")[:200])
         if search:
+            # A visit confirmed or corrected matches only by its final name (since 25 Nov 2026:
+            # a search for Waterhen must not bring a corrected Magpie-Robin because a model once guessed
+            # Waterhen). Everything else keeps the full term match (names and candidates).
+            # The term match drives the query as before; the final names are always among a
+            # record's terms, so the final-name check only narrows what already matched.
+            connection.create_function("falcon_norm", 1, normalize, deterministic=True)
             conditions.append("e.event_id IN (SELECT event_id FROM observation_terms WHERE value LIKE ?)")
-            parameters.append(f"%{search}%")
+            conditions.append(
+                "(CASE WHEN e.review_status IN ('correct','corrected') "
+                f"THEN falcon_norm({FINAL_NAME_SQL}) LIKE ? ELSE 1 END)"
+            )
+            parameters.extend([f"%{search}%", f"%{search}%"])
         return conditions, parameters
 
     def encounters(
@@ -543,7 +718,8 @@ class EventStore:
         min_score: float | None = None, include_discarded: bool = False, q: str | None = None,
         limit: int = 50, offset: int = 0, resolved_only: bool = False,
         order: Literal["latest", "first_seen"] = "latest", hide_glimpses: bool = False,
-        tiers: AnalysisSettings | None = None,
+        tiers: AnalysisSettings | None = None, unidentified: bool = False, hidden_only: bool = False,
+        group: Literal["visit", "stay"] = "visit",
     ) -> dict[str, Any]:
         """One row per animal visit: a visual track, or a single sound detection.
 
@@ -551,9 +727,25 @@ class EventStore:
         per encounter instead of once per analyzed frame. `order` sorts by the latest
         activity (review) or by when each visit began (a live feed that must not reorder
         while an animal lingers). With resolved_only, unresolved records are left out and
-        the number of visits hidden that way is reported.
+        the number of visits hidden that way is reported. With unidentified, only
+        unreviewed pictures with no species are listed, hidden ones included. With
+        hidden_only (Review's "Hidden" status), only the unreviewed visits FALCON keeps out
+        of the default list are listed: exactly what "Show hidden" adds there.
+
+        With group="stay" (Review), limit and offset count stays (stays()), so the visits
+        of one stay recording always come on the same page: a stay sits where its first visit
+        would sit in the usual order, its visits in time order. total still counts visits;
+        total_stays and visits_before (matching visits on earlier pages) are added. Hidden
+        unreviewed visits of a listed stay that the filter left out come along with
+        attached=True; they are never in total.
         """
         limit, offset = min(200, max(1, limit)), max(0, offset)
+        by_stays = group == "stay"
+        if hidden_only:
+            review_status, include_discarded = "unreviewed", False
+            resolved_only = hide_glimpses = unidentified = False
+        if unidentified:
+            resolved_only = False
         with self.database.connection() as connection:
             available = tables(connection)
             conditions, parameters = self._filters(
@@ -561,6 +753,8 @@ class EventStore:
                 captured_from=captured_from, captured_to=captured_to, min_score=min_score,
                 include_discarded=include_discarded, q=q, resolved_only=resolved_only,
             )
+            if unidentified:
+                conditions.append(UNIDENTIFIED_SQL)
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             hidden = 0
             if resolved_only:
@@ -579,36 +773,102 @@ class EventStore:
                 "GROUP_CONCAT(DISTINCT e.review_status) AS statuses "
                 "FROM observations e" + where + " GROUP BY encounter_id"
             )
-            glimpses = 0
-            if hide_glimpses:
-                # A glimpse: a picture visit seen in one analysed frame only.
-                glimpse = GLIMPSE_SQL
-                glimpses = connection.execute(
-                    f"SELECT COUNT(*) FROM ({grouped} HAVING {glimpse})", parameters,
-                ).fetchone()[0]
-                grouped += f" HAVING NOT ({glimpse})"
-            total = connection.execute(f"SELECT COUNT(*) FROM ({grouped})", parameters).fetchone()[0]
+            # A glimpse: a picture visit seen in one analysed frame only. A Probable sound
+            # bout waits behind "Show hidden" like unresolved pictures. Both are counted, and
+            # the rest totalled, in one grouped pass (a visit is never both: picture vs sound).
+            glimpse = LIST_GLIMPSE_SQL if hide_glimpses else "0"
+            probable = SOUND_PROBABLE_SQL if resolved_only else "0"
+            only_hidden = f" HAVING {HIDDEN_GROUP_SQL}" if hidden_only else ""
+            grouped += only_hidden
+            every_group, glimpses, probables = connection.execute(
+                f"SELECT COUNT(*), COALESCE(SUM(g), 0), COALESCE(SUM(p), 0) FROM ("
+                f"SELECT ({glimpse}) AS g, ({probable}) AS p FROM observations e{where} "
+                f"GROUP BY {ENCOUNTER_KEY_SQL}{only_hidden})", parameters,
+            ).fetchone()
+            hidden += probables
+            total = every_group - glimpses - probables
+            leave_out = [sql for sql in (glimpse, probable) if sql != "0"]
+            if leave_out:
+                grouped += " HAVING " + " AND ".join(f"NOT ({sql})" for sql in leave_out)
             sort = "first_day DESC" if order == "first_seen" else "last_day DESC"
-            groups = connection.execute(
-                f"SELECT * FROM ({grouped}) ORDER BY {sort}, encounter_id LIMIT ? OFFSET ?",
-                [*parameters, limit, offset],
-            ).fetchall()
-            if not groups:
-                return {"encounters": [], "total": total, "hidden_unresolved": hidden, "hidden_glimpses": glimpses}
-            keys = [group["encounter_id"] for group in groups]
-            rows = connection.execute(
-                f"SELECT e.payload, {ENCOUNTER_KEY_SQL} AS encounter_id FROM observations e"
-                + where + (" AND " if where else " WHERE ")
-                + f"{ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(keys))}) ORDER BY e.timestamp_ms",
-                [*parameters, *keys],
-            ).fetchall()
+            extra: dict[str, Any] = {}
+            stay_of: dict[str, str] = {}
+            attached: list[Any] = []
+            if group == "stay":
+                stay_map, stay_members, stay_recordings = stays(connection)
+                ordered = connection.execute(
+                    f"SELECT * FROM ({grouped}) ORDER BY {sort}, encounter_id", parameters,
+                ).fetchall()
+                by_stay: dict[str, list[Any]] = {}
+                for row in ordered:  # a stay sits where its first visit sits
+                    by_stay.setdefault(stay_map.get(row["encounter_id"], row["encounter_id"]), []).append(row)
+                order_of_stays = list(by_stay)
+                chosen = order_of_stays[offset:offset + limit]
+                extra = {"total_stays": len(by_stay),
+                         "visits_before": sum(len(by_stay[s]) for s in order_of_stays[:offset])}
+                groups = [row for stay in chosen for row in
+                          sorted(by_stay[stay], key=lambda r: (r["first_day"] or 0, r["encounter_id"]))]
+                stay_of = {row["encounter_id"]: stay_map.get(row["encounter_id"], row["encounter_id"])
+                           for row in groups}
+                listed = set(stay_of)
+                if chosen and (resolved_only or hide_glimpses):
+                    # Rule 4: the hidden unreviewed visits of these stays that the filter left out.
+                    left_out = [k for s in chosen for k in stay_members.get(s, []) if k not in listed]
+                    for row in connection.execute(
+                        f"SELECT {ENCOUNTER_KEY_SQL} AS encounter_id, COUNT(*) AS records, "
+                        f"MIN(COALESCE(julianday({capture}), julianday(e.recorded_at))) AS first_day, "
+                        "GROUP_CONCAT(DISTINCT e.review_status) AS statuses FROM observations e "
+                        f"WHERE {ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(left_out))}) "
+                        f"GROUP BY encounter_id HAVING MAX(e.review_status!='unreviewed')=0 AND {HIDDEN_GROUP_SQL} "
+                        "ORDER BY first_day, encounter_id", left_out,
+                    ).fetchall() if left_out else []:
+                        attached.append(row)
+                    for row in attached:
+                        stay_of[row["encounter_id"]] = stay_map[row["encounter_id"]]
+            else:
+                groups = connection.execute(
+                    f"SELECT * FROM ({grouped}) ORDER BY {sort}, encounter_id LIMIT ? OFFSET ?",
+                    [*parameters, limit, offset],
+                ).fetchall()
+            if not groups and not attached:
+                return {"encounters": [], "total": total, "hidden_unresolved": hidden, "hidden_glimpses": glimpses,
+                        **extra}
+            keys = [found["encounter_id"] for found in groups]
             members: dict[str, list[Event]] = {}
-            for row in rows:
-                members.setdefault(row["encounter_id"], []).append(adapter.validate_json(row["payload"]))
+            if keys:
+                rows = connection.execute(
+                    f"SELECT e.payload, {ENCOUNTER_KEY_SQL} AS encounter_id FROM observations e"
+                    + where + (" AND " if where else " WHERE ")
+                    + f"{ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(keys))}) ORDER BY e.timestamp_ms",
+                    [*parameters, *keys],
+                ).fetchall()
+                for row in rows:
+                    members.setdefault(row["encounter_id"], []).append(adapter.validate_json(row["payload"]))
+            if attached:
+                extra_keys = [row["encounter_id"] for row in attached]
+                for row in connection.execute(
+                    f"SELECT e.payload, {ENCOUNTER_KEY_SQL} AS encounter_id FROM observations e "
+                    f"WHERE {ENCOUNTER_KEY_SQL} IN ({','.join('?' * len(extra_keys))}) ORDER BY e.timestamp_ms",
+                    extra_keys,
+                ).fetchall():
+                    members.setdefault(row["encounter_id"], []).append(adapter.validate_json(row["payload"]))
+                # Each attached visit goes right after the last listed visit of its stay.
+                merged: list[Any] = []
+                waiting: dict[str, list[Any]] = {}
+                for row in attached:
+                    waiting.setdefault(stay_of[row["encounter_id"]], []).append(row)
+                for index, row in enumerate(groups):
+                    merged.append(row)
+                    nxt = groups[index + 1] if index + 1 < len(groups) else None
+                    if nxt is None or stay_of[nxt["encounter_id"]] != stay_of[row["encounter_id"]]:
+                        merged.extend(waiting.pop(stay_of[row["encounter_id"]], []))
+                groups = merged
+                keys = [found["encounter_id"] for found in groups]
             latest = enrich_events(
                 connection, [members[key][-1] for key in keys if members.get(key)], available=available,
             )
         latest_by_key = {key: event for key, event in zip([k for k in keys if members.get(k)], latest, strict=True)}
+        attached_keys = {row["encounter_id"] for row in attached}
         result = []
         # Phase 1 visits carry their counted tier in the visits table (spec P5).
         visit_ids = [e.visit_id for key in keys for e in members.get(key, [])[-1:]
@@ -621,20 +881,22 @@ class EventStore:
                     visit_ids,
                 ):
                     counted[row["visit_id"]] = {**json.loads(row["payload"]), "hidden_reason": row["hidden_reason"]}
-        for group in groups:
-            key = group["encounter_id"]
+        for found in groups:
+            key = found["encounter_id"]
             events = members.get(key, [])
             if not events:
                 continue
             event = latest_by_key[key]
             row = counted.get(event.visit_id or "") if event.modality == "visual" else None
-            if row and row.get("hidden_reason") == "INSECT_NIGHT" and event.modality == "visual" \
+            if row and row.get("hidden_reason") in ("INSECT_NIGHT", "RODENT_NIGHT") and event.modality == "visual" \
                     and event.review.status == "unreviewed":
-                # Insects at night: never named, never Likely or Probable.
+                # Insects at night, and rats and mice at night while open: never Likely or
+                # Probable, so they never ring.
                 c = event.classification.model_copy(deep=True)
                 c.status, c.certainty, c.scientific_name, c.common_name = "unknown", "unknown", None, None
                 c.broad_group, c.contenders, c.genus = "organism", [], None
-                c.unknown_reason = c.display_label = INSECT_LABEL
+                c.unknown_reason = c.display_label = (
+                    INSECT_LABEL if row.get("hidden_reason") == "INSECT_NIGHT" else RODENT_LABEL)
                 event = event.model_copy(update={"classification": c})
             elif row and row.get("tier") and event.modality == "visual" and event.review.status == "unreviewed":
                 candidates = sorted(
@@ -653,7 +915,15 @@ class EventStore:
                 )
                 if tiered is not event.classification:
                     event = event.model_copy(update={"classification": tiered})
-            statuses = (group["statuses"] or "").split(",")
+            if event.modality == "audio":
+                # A sound visit carries its calls' second opinion: agreed if any call was.
+                verdicts = [e.cleaned_agrees for e in events if e.modality == "audio" and e.cleaned_agrees is not None]
+                if verdicts:
+                    event = event.model_copy(update={
+                        "cleaned_agrees": any(verdicts),
+                        "cleaned_score": max(e.cleaned_score or 0.0 for e in events if e.modality == "audio"),
+                    })
+            statuses = (found["statuses"] or "").split(",")
             best = max(
                 events, key=lambda item: (item.detector.score or 0) if item.modality == "visual" else item.confidence,
             )
@@ -664,13 +934,26 @@ class EventStore:
                 "encounter_id": key, "modality": event.modality, "source_id": event.source_id,
                 "source_filename": event.source_filename, "job_id": event.job_id,
                 "track_id": event.track_id if event.modality == "visual" else None,
-                "records": group["records"], "first_captured_at": _captured(first, event),
+                "records": found["records"], "first_captured_at": _captured(first, event),
                 "duration_ms": max(0, end - start), "review_status": statuses[0] if len(statuses) == 1 else "mixed",
                 "thumbnail_event_id": best.event_id, "event": event,
                 # A sound bout is as certain as its clearest call.
                 "best_confidence": best.confidence if best.modality == "audio" else None,
             })
-        return {"encounters": result, "total": total, "hidden_unresolved": hidden, "hidden_glimpses": glimpses}
+            if by_stays:
+                result[-1]["stay_id"] = stay_of[key]
+                result[-1]["attached"] = key in attached_keys
+                # For the stay card: its recordings, and why FALCON hid a picture visit.
+                result[-1]["stay_recordings"] = stay_recordings.get(stay_of[key], 0)
+                reason = (row or {}).get("hidden_reason") if event.modality == "visual" else None
+                if event.modality == "visual" and not row:
+                    # An old group without a visit row: which list rule hides it, if any.
+                    reason = ("GLIMPSE" if found["records"] == 1 else
+                              "UNRESOLVED" if event.review.status == "unreviewed"
+                              and event.classification.status != "candidate" else None)
+                result[-1]["hidden_reason"] = reason
+        return {"encounters": result, "total": total, "hidden_unresolved": hidden, "hidden_glimpses": glimpses,
+                **extra}
 
     def _decisive_rows(
         self, connection: sqlite3.Connection, where: str, parameters: list[Any],
@@ -690,6 +973,7 @@ class EventStore:
             "json_extract(e.payload,'$.common_name')) AS predicted_common, "
             "json_extract(e.payload,'$.classification.status') AS classification_status, "
             "COALESCE(json_extract(e.payload,'$.classification.broad_group'),'') AS broad_group, "
+            "COALESCE(json_extract(e.payload,'$.outside_area'), 0) AS outside_area, "
             f"{SCORE_SQL} AS score FROM observations e" + where
         )
         ranked = (
@@ -716,6 +1000,9 @@ class EventStore:
         if status == "correct":
             return "animal", row["predicted_scientific"], row["predicted_common"], "human"
         if row["modality"] == "audio":
+            # An unidentified sound carries BirdNET's guess, never counted as a species.
+            if row["outside_area"]:
+                return "animal", None, None, "machine"
             return "animal", row["predicted_scientific"], row["predicted_common"], "machine"
         classification = row["classification_status"]
         if classification == "non_wildlife":
@@ -743,7 +1030,7 @@ class EventStore:
             conditions, parameters = self._filters(
                 connection, source_id=source_id, scope=scope, review_status=None, modality=None,
                 captured_from=captured_from, captured_to=captured_to, min_score=None,
-                include_discarded=False, q=None,
+                include_discarded=False, q=None, keep_not_animal=True,
             )
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             rows = self._decisive_rows(connection, where, parameters)
@@ -815,7 +1102,7 @@ class EventStore:
             conditions, parameters = self._filters(
                 connection, source_id=None, scope="live", review_status=None, modality=None,
                 captured_from=captured_from, captured_to=captured_to, min_score=None,
-                include_discarded=False, q=None,
+                include_discarded=False, q=None, keep_not_animal=True,
             )
             where = " WHERE " + " AND ".join(conditions) if conditions else ""
             rows = self._decisive_rows(connection, where, parameters)

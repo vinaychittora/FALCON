@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """RTSP capture with independent preview, audio, and bounded in-memory mailboxes."""
 
 import logging
@@ -28,6 +32,72 @@ log = logging.getLogger(__name__)
 
 class GeometryChanged(Exception):
     """The picture size changed mid-stream; reconnect so the decoder starts fresh."""
+
+
+def broken_packet(packet: Any, mjpeg: bool) -> bool:
+    """A camera packet that must not be shown, analysed or recorded.
+
+    Corrupt per the demuxer, or for MJPEG not exactly one whole picture: it must start
+    with start-of-image, end with end-of-image and hold no second start-of-image (entropy
+    data never contains FF D8: every FF byte there is stuffed).
+    """
+    if getattr(packet, "is_corrupt", False):
+        return True
+    if not mjpeg:
+        return False
+    data = bytes(packet)
+    if not data:
+        return False
+    return (
+        data[:2] != b"\xff\xd8"
+        or data.rstrip(b"\x00")[-2:] != b"\xff\xd9"
+        or data.find(b"\xff\xd8", 2) != -1
+    )
+
+
+def damaged_picture(rgb: Any) -> bool:
+    """A whole JPEG whose picture data is damaged inside (16 Nov 10:12: after a node
+    stream restart every frame was block noise on top and one flat colour below).
+
+    The decoder fills the part it could not decode with a single colour, so the bottom
+    band of a damaged frame is perfectly flat while the rest of the picture is not. A
+    real scene, even at night, has sensor noise in every band. About 0.1 ms per frame:
+    only a sparse grid of pixels is read.
+    """
+    height = rgb.shape[0]
+    if height < 32:
+        return False
+    band = rgb[height - height // 12 :: 3, ::16].reshape(-1, rgb.shape[2])
+    rest = rgb[: height // 2 : 6, ::16].reshape(-1, rgb.shape[2])
+    if not band.size or not rest.size:
+        return False
+    flat = int(np.ptp(band, axis=0).max()) <= 3
+    return bool(flat and int(np.ptp(rest, axis=0).max()) > 24)
+
+
+# Sound windows are placed by sample count, never by arrival time, unless the two
+# disagree by more than this (a real break in the sound, not clock drift).
+REANCHOR_MS = 5000
+
+
+def audio_window_start(origin: int, samples_emitted: int, window_end_ms: int, receive_start: int) -> int:
+    """Session time (ms) of the next 9 s window of 48 kHz sound.
+
+    The first window of a connection is anchored on receive time (the buffered audio
+    ends now). After that each window follows the previous one by its sample count:
+    48,000 samples are one second. 14 Nov: placing every window by arrival time put a
+    0.75 s hole between windows when this computer's clock ran 8 % fast (WSL after two
+    days' uptime), although the node delivered exactly 48,000 samples a second. Only
+    when arrival and sample count drift more than REANCHOR_MS apart (a stall the
+    receive check did not catch, or hours of drift) is the window re-anchored, and
+    windows never overlap.
+    """
+    if samples_emitted == 0:
+        return max(origin, receive_start)
+    by_samples = origin + samples_emitted // 48
+    if abs(receive_start - by_samples) > REANCHOR_MS:
+        return max(window_end_ms, receive_start)
+    return by_samples
 
 
 @dataclass(frozen=True)
@@ -83,8 +153,15 @@ class RTSPSource:
         self.latest: Frame | None = None
         self.sequence = 0
         self.decoded_frames = 0
+        # Camera frames refused as broken (incomplete JPEG, two frames run together, or
+        # flagged corrupt by the decoder); never shown, analysed or recorded.
+        self.broken_frames = 0
+        # Since when (monotonic) every checked frame has been damaged inside; None while
+        # the picture is clean. Watched by the live service's camera self-heal.
+        self.damaged_since: float | None = None
         self.decoded_audio_frames = 0
         self.audio_discontinuities = 0
+        self.audio_reanchors = 0
         self.reconnects = 0
         # A microphone-only source (a sensor node without a camera) has no video stream.
         self.audio_only = False
@@ -158,6 +235,7 @@ class RTSPSource:
                 else 0
             )
         result["video_rate_window_seconds"] = 5
+        result["broken_frames_dropped"] = self.broken_frames
         if self._recording_error:
             result["evidence_capture_fault"] = self._recording_error
         return result
@@ -349,13 +427,23 @@ class RTSPSource:
                         video.thread_type = "AUTO"
                         next_preview = 0.0
                         geometry: tuple[int, int] | None = None
+                        mjpeg = str(getattr(getattr(video, "codec_context", None), "name", "")) == "mjpeg"
                         for packet in container.demux(video):
                             if self.cancel.is_set():
                                 return
                             self._record_video_packet(getattr(packet, "size", 0))
+                            if broken_packet(packet, mjpeg):
+                                # 14 Nov 09:40: after a node stream restart, while the IR
+                                # filter hunted, frames showed the tails of two pictures
+                                # stacked. A broken frame is dropped before recording too.
+                                self.broken_frames += 1
+                                continue
                             generation = self._record_packet(packet)
                             for decoded in packet.decode():
                                 if not isinstance(decoded, av.VideoFrame):
+                                    continue
+                                if getattr(decoded, "is_corrupt", False):
+                                    self.broken_frames += 1
                                     continue
                                 size = (decoded.width, decoded.height)
                                 if geometry is None:
@@ -375,6 +463,13 @@ class RTSPSource:
                                     continue
                                 next_preview = now + 0.2
                                 rgb = np.asarray(decoded.to_ndarray(format="rgb24"), dtype=np.uint8)
+                                if damaged_picture(rgb):
+                                    # Never shown or analysed (saved clips keep it).
+                                    self.broken_frames += 1
+                                    if self.damaged_since is None:
+                                        self.damaged_since = now
+                                    continue
+                                self.damaged_since = None
                                 grey = False
                                 if self.night is not None:
                                     rgb, grey = self.night.apply(rgb)
@@ -510,14 +605,18 @@ class RTSPSource:
                                 self._hear(samples)
                             size = 48000 * 2 * 9
                             while len(pcm) >= size:
-                                # Window start from receive time: the buffered audio ends
-                                # now. Counting samples alone drifts by minutes per hour
-                                # when the source delivers fewer samples than declared.
-                                # Windows never overlap or start before the connection.
-                                start_ms = max(
-                                    audio_origin if samples_emitted == 0 else window_end_ms,
+                                start_ms = audio_window_start(
+                                    audio_origin,
+                                    samples_emitted,
+                                    window_end_ms,
                                     self.elapsed_ms() - round(len(pcm) / 96),
                                 )
+                                if start_ms != audio_origin + samples_emitted // 48:
+                                    # The first window's anchor, or a re-anchor after a
+                                    # real break (counted).
+                                    if samples_emitted:
+                                        self.audio_reanchors += 1
+                                    audio_origin = start_ms - samples_emitted // 48
                                 window_end_ms = start_ms + 9000
                                 self.audio(
                                     AudioChunk(

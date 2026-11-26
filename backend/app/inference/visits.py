@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """How a visit is formed: motion, time and position memory (detection spec P2).
 
 Everything the detector finds is a silent *candidate*. A candidate becomes a *visit*
@@ -227,6 +231,16 @@ class VisitEngine:
             spot.stale = True
         self.positions.clear()
         self.dirty = True
+
+    def forget_spot(self, spot_id: int) -> bool:
+        """Forget one spot (and the still positions that would rebuild it at once)."""
+        spot = next((s for s in self.spots if s.spot_id == spot_id), None)
+        if spot is None:
+            return False
+        self.spots = [s for s in self.spots if s is not spot]
+        self.positions = [p for p in self.positions if iou(tuple(p.box), tuple(spot.box)) < SPOT_IOU]  # type: ignore[arg-type]
+        self.dirty = True
+        return True
 
     def forget_all(self) -> int:
         count = len(self.spots)

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useRef, useState } from "react";
 import {
   nodePicture,
@@ -59,6 +63,20 @@ const MENU_LABELS: Record<string, Record<number, string>> = {
 };
 
 const DEBOUNCE_MS = 250;
+
+/** The picture that worked at the water bowl (8 Nov 2026), restored on 9 Nov after a
+ * dark stream. "Restore picture" sets these on cameras that have the controls. */
+export const GOOD_PICTURE: Record<string, number> = {
+  brightness: 0,
+  contrast: 11,
+  saturation: 75,
+  gamma: 102,
+  gain: 17,
+  sharpness: 12,
+  backlight_compensation: 66,
+  auto_exposure: 3,
+  exposure_dynamic_framerate: 0,
+};
 
 export function controlLabel(control: PictureControl): string {
   return (
@@ -135,6 +153,16 @@ export default function PictureControls({ nodeId }: { nodeId: string }) {
   const changedFromDefault = data.controls.some(
     (control) => control.value !== control.default,
   );
+  const goodPicture = Object.fromEntries(
+    data.controls
+      .filter((control) => control.name in GOOD_PICTURE)
+      .map((control) => [control.name, GOOD_PICTURE[control.name]]),
+  );
+  const isGoodPicture = data.controls.every(
+    (control) =>
+      !(control.name in GOOD_PICTURE) ||
+      control.value === GOOD_PICTURE[control.name],
+  );
 
   return (
     <div className="picture-controls">
@@ -209,6 +237,21 @@ export default function PictureControls({ nodeId }: { nodeId: string }) {
         })}
       </div>
       <div className="form-row">
+        {Object.keys(goodPicture).length > 0 && (
+          <button
+            type="button"
+            className="text-button"
+            disabled={busy || isGoodPicture}
+            title="The settings that gave a good picture at the water bowl"
+            onClick={() => {
+              window.clearTimeout(timer.current);
+              pending.current = {};
+              void send({ values: goodPicture });
+            }}
+          >
+            Restore picture
+          </button>
+        )}
         <button
           type="button"
           className="text-button"

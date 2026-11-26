@@ -1,9 +1,13 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Clip retention plan (spec P6), REPORT ONLY: nothing is deleted.
 
 The spec asks to keep clips of hidden records 48 h unless opened or reviewed, clips of
 visits 30 days, at most 2 GB of new clips a day (oldest hidden clips first). The
 owner's standing rule is that nothing is deleted automatically, so this only writes
-what the rule *would* remove, for him to decide:
+what the rule *would* remove, to decide on:
 
     python -m app.research.clip_retention   # -> data/diagnostics/clip-retention-DATE.json
 
@@ -18,7 +22,8 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-DATA = Path("/home/vinay/Workspace/FALCON/data")
+# The repository's own data folder (the app's default, app.config.Settings.data_dir).
+DATA = Path(__file__).resolve().parents[3] / "data"
 HIDDEN = {"GLIMPSE", "STILL", "UNIDENTIFIED", "SMALL", "CANDIDATE"}
 DAILY_CAP = 2 * 1024**3
 

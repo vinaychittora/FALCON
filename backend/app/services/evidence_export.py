@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Portable FALCON evidence archive; not a Camtrap DP conformance claim."""
 
 import csv
@@ -81,6 +85,8 @@ def _observation_row(
     elif event.modality == "visual" and event.classification.status != "candidate":
         accepted_scientific, accepted_common = None, None
         identification = event.classification.status
+    elif event.modality == "audio" and event.outside_area and status != "correct":
+        accepted_scientific, accepted_common, identification = None, None, "unidentified"
     # Unreviewed names remain predictions. Do not label them as accepted identifications.
     if identification == "machine_candidate":
         accepted_scientific, accepted_common = None, None

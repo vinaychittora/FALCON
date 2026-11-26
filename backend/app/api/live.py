@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ValidationError
 from starlette.concurrency import run_in_threadpool
@@ -79,6 +83,15 @@ def forget_scenery(request: Request) -> dict:
     return request.app.state.live.forget_scenery()
 
 
+@router.post("/scenery/{spot_id}/forget")
+def forget_spot(spot_id: int, request: Request) -> dict:
+    """Forget one learned spot by its number."""
+    result = request.app.state.live.forget_spot(spot_id)
+    if result is None:
+        raise HTTPException(404, "No saved spot with that number")
+    return result
+
+
 @router.get("/preview.jpg")
 def preview(request: Request) -> Response:
     data = request.app.state.live.jpeg()
@@ -86,7 +99,11 @@ def preview(request: Request) -> Response:
         raise HTTPException(
             503, "Waiting for a live camera frame", headers={"Cache-Control": "no-store"}
         )
-    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store, max-age=0"})
+    headers = {"Cache-Control": "no-store, max-age=0"}
+    if request.app.state.live.person_in_view():
+        # Read by the friends' view server, which pauses its picture; this view is unchanged.
+        headers["X-Falcon-Person"] = "1"
+    return Response(data, media_type="image/jpeg", headers=headers)
 
 
 @router.get("/audio.pcm")

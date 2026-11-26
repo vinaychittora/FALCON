@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import json
 import threading
 import time
@@ -13,6 +17,7 @@ from app.main import create_app
 from app.schemas import AnalysisSettings
 from app.schemas_live import CameraProfileWrite, LiveStart, LiveState
 from app.services.appliance import AppliancePreferences, ApplianceService
+from app.services.configuration import load_analysis_settings
 from app.storage.cameras import CameraStore
 from app.storage.database import Database
 from app.taxonomy.cache import atomic_json
@@ -89,7 +94,7 @@ def test_startup_uses_saved_credentials_and_saved_analysis_configuration(tmp_pat
     service, cameras, camera = setup(tmp_path)
     save(cameras, audio_enabled=False)
     service.configure(AppliancePreferences(auto_observe=True))
-    settings = AnalysisSettings(detector_threshold=0.43, audio_enabled=False)
+    settings = AnalysisSettings(mask_people=False, audio_enabled=False)
     atomic_json(tmp_path / "settings.json", settings.model_dump(mode="json"))
     # A fresh service represents a later application startup.
     restored = ApplianceService(service.settings, cameras, camera)
@@ -98,7 +103,9 @@ def test_startup_uses_saved_credentials_and_saved_analysis_configuration(tmp_pat
     assert restored._worker and restored._worker.is_alive()
     assert len(camera.requests) == 1
     assert camera.requests[0].password.get_secret_value() == "fixture-secret"
-    assert camera.requests[0].config == settings
+    # The saved choices, with the rig's fixed tuning applied on load.
+    assert camera.requests[0].config == load_analysis_settings(service.settings)
+    assert not camera.requests[0].config.mask_people and not camera.requests[0].config.audio_enabled
     assert not camera.requests[0].save_profile
     public = restored.status().model_dump_json()
     assert "fixture-secret" not in public and "fixture-user" not in public and "rtsp://" not in public

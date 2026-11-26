@@ -79,7 +79,7 @@ From the WSL project directory:
 
 ```bash
 source scripts/env.sh
-python scripts/build_rajasthan_taxa.py
+python scripts/build_taxa.py
 ```
 
 The builder uses a seven-day API-response cache. Add `--refresh` to fetch fresh
@@ -95,7 +95,7 @@ species past the cap instead of silently stopping at the selected maximum.
 To select an additional **known, active species** by canonical iNaturalist ID:
 
 ```bash
-python scripts/build_rajasthan_taxa.py --include-taxon 117024
+python scripts/build_taxa.py --include-taxon 117024
 ```
 
 Repeat the option for multiple selections. The list is retained on subsequent

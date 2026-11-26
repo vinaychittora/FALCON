@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
 .sensor-history {
   margin-top: 2.5rem;
   padding-top: 1.5rem;
@@ -71,3 +77,62 @@
 .sensor-history footer button {
   margin-left: 0.65rem;
 }
+
+/* Embedded readings table under the graph */
+.sensor-history.sensor-table { margin-top: 0.5rem; padding-top: 0; border-top: 0; }
+
+/* Weather graph: warm temperature, blue humidity, thin grey pressure, pale-blue rain */
+.weather-graph { --w-temp: #c4501f; --w-hum: #2a6db5; --w-press: #7a817d; --w-rain: rgba(42, 109, 181, 0.28); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme=light]) .weather-graph { --w-temp: #f0884f; --w-hum: #6fa8ec; --w-press: #a3aaa6; --w-rain: rgba(111, 168, 236, 0.32); }
+}
+:root[data-theme=dark] .weather-graph { --w-temp: #f0884f; --w-hum: #6fa8ec; --w-press: #a3aaa6; --w-rain: rgba(111, 168, 236, 0.32); }
+.weather-graph .segmented { margin-bottom: 0.75rem; }
+.weather-graph .segmented button { min-height: 44px; }
+.weather-chart { width: 100%; position: relative; }
+.weather-chart > svg { display: block; touch-action: pan-y; border-radius: 6px; }
+.weather-chart > svg:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.weather-legend { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.4rem; }
+.weather-legend .key::before { content: ; display: inline-block; width: 14px; height: 3px; margin-right: 6px; vertical-align: middle; border-radius: 2px; }
+.weather-legend .key-temperature::before { background: var(--w-temp); }
+.weather-legend .key-humidity::before { background: var(--w-hum); }
+.weather-legend .key-rain::before { background: var(--w-rain); height: 10px; }
+.weather-legend .key-pressure::before { display: none; }
+.weather-legend .key-pressure { cursor: pointer; }
+.weather-chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.weather-chart .line.temperature { stroke: var(--w-temp); }
+.weather-chart .line.humidity { stroke: var(--w-hum); }
+.weather-chart .line.pressure { stroke: var(--w-press); stroke-width: 1.2; stroke-dasharray: 4 3; }
+.weather-chart .rain { fill: var(--w-rain); }
+.weather-chart .grid { stroke: var(--line); stroke-width: 1; }
+.weather-chart .baseline { stroke: var(--line); }
+.weather-chart .sun-mark { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.5; }
+.weather-chart .hover { stroke: var(--muted); stroke-width: 1; }
+.weather-chart .axis { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.weather-chart .axis-temperature { fill: var(--w-temp); }
+.weather-chart .axis-humidity { fill: var(--w-hum); }
+.weather-readout { margin: 0.4rem 0 0; font-size: 0.85rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.weather-readout strong { color: inherit; font-weight: 600; }
+
+/* Legend: a short line in the series' own colour, its icon and its unit */
+.weather-legend { align-items: center; gap: 4px 8px; }
+.w-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 8px; border-radius: 8px; color: var(--ink); font-size: 13px; }
+.w-chip svg { color: var(--icon); }
+.w-toggle { border: 1px solid var(--line); background: transparent; cursor: pointer; }
+.w-toggle[aria-pressed="false"] { color: var(--muted); }
+.w-toggle[aria-pressed="false"] .w-swatch { opacity: 0.45; }
+.w-toggle[aria-pressed="true"] { background: var(--surface-hover); }
+.w-swatch { display: inline-block; width: 24px; height: 3px; border-radius: 2px; flex: none; }
+.w-swatch.temperature { background: var(--w-temp); }
+.w-swatch.humidity { background: var(--w-hum); }
+.w-swatch.pressure { background: repeating-linear-gradient(90deg, var(--w-press) 0 4px, transparent 4px 7px); height: 2px; }
+.w-swatch.rain { background: var(--w-rain); height: 10px; border-radius: 1px; }
+/* The tooltip beside the cursor line, inside the graph */
+.weather-tip { position: absolute; top: 44px; z-index: 2; display: grid; gap: 3px; min-width: 150px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 18px var(--shadow-soft); color: var(--ink); font-size: 13px; font-variant-numeric: tabular-nums; pointer-events: none; white-space: nowrap; }
+.weather-tip.side-right { transform: translateX(12px); }
+.weather-tip.side-left { transform: translateX(calc(-100% - 12px)); }
+.weather-tip strong { font-weight: 600; }
+.weather-tip .w-row { display: flex; align-items: center; gap: 6px; }
+.weather-tip .w-row svg { color: var(--icon); }
+.weather-tip .w-swatch { width: 14px; }
+.weather-readout { display: none; }

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import {
   setListenDenoise,
   setListenVolume,
@@ -6,6 +10,7 @@ import {
   useListen,
 } from "../api/listenStore";
 import { meterFraction } from "../api/liveListen";
+import { BarOptions } from "./Floating";
 
 /** A small level bar (−60 to 0 dBFS) with the RMS level and a peak tick. */
 export function LevelMeter({ rms, peak }: { rms: number; peak: number }) {
@@ -17,7 +22,6 @@ export function LevelMeter({ rms, peak }: { rms: number; peak: number }) {
       aria-valuemin={-60}
       aria-valuemax={0}
       aria-valuenow={Number.isFinite(rms) ? Math.round(rms) : -60}
-      title={Number.isFinite(rms) ? `${Math.round(rms)} dBFS` : "silent"}
     >
       <i style={{ width: `${meterFraction(rms) * 100}%` }} />
       <b style={{ left: `${meterFraction(peak) * 100}%` }} />
@@ -90,12 +94,9 @@ export default function LiveListen({
       </label>
       {listen.on && <LevelMeter rms={listen.rms} peak={listen.peak} />}
       {listen.on && !compact && (
-        <details className="bar-options">
-          <summary aria-label="Listen options">⋯</summary>
-          <div className="bar-popover">
-            <ListenOptions />
-          </div>
-        </details>
+        <BarOptions label="Listen options">
+          <ListenOptions />
+        </BarOptions>
       )}
     </span>
   );

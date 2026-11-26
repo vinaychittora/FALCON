@@ -1,7 +1,12 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { describe, expect, it } from "vitest";
 import type { VisualEvent } from "../types";
 import {
   audioCertainty,
+  cleanedSoundNote,
   certaintyDetail,
   certaintyOf,
   joinNames,
@@ -136,6 +141,13 @@ describe("certainty", () => {
     expect(audioCertainty(0.6)).toBe("likely");
     expect(audioCertainty(0.59)).toBe("probable");
     expect(audioCertainty(0.41)).toBe("probable");
+    // The cleaned sound must agree; older records have no verdict and keep their tier.
+    expect(audioCertainty(0.8, true)).toBe("likely");
+    expect(audioCertainty(0.8, false)).toBe("probable");
+    expect(audioCertainty(0.8, null)).toBe("likely");
+    expect(audioCertainty(0.5, true)).toBe("probable");
+    expect(cleanedSoundNote(true, 0.812)).toBe("Cleaned sound agrees, 0.81");
+    expect(cleanedSoundNote(false, 0.1)).toBe("Cleaned sound does not agree");
     expect(joinNames(["A", "B", "C"])).toBe("A, B or C");
     expect(joinNames(["A"])).toBe("A");
   });

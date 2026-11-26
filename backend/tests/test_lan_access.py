@@ -1,10 +1,14 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.lan_access import COOKIE
 from app.main import create_app
 
-PHONE = {"host": "192.168.1.70:8000"}
+PHONE = {"host": "192.0.2.70:8000"}
 
 
 def client(tmp_path, *, enabled: bool) -> tuple[TestClient, str]:
@@ -12,7 +16,7 @@ def client(tmp_path, *, enabled: bool) -> tuple[TestClient, str]:
     app.state.lan.update(enabled=enabled)
     app.state.lan.hostnames = lambda: frozenset({"falcon-pc", "falcon-pc.local"})  # Windows' own name
     # Requests arrive from the Windows port forward, a private address.
-    return TestClient(app, client=("172.20.0.1", 50000)), app.state.lan.status()["code"]
+    return TestClient(app, client=("198.51.100.1", 50000)), app.state.lan.status()["code"]
 
 
 def test_phone_is_refused_while_switched_off(tmp_path):
@@ -44,7 +48,7 @@ def test_phone_cannot_manage_access_or_skip_origin_checks(tmp_path):
 
 def test_dns_names_and_public_addresses_are_refused(tmp_path):
     test, code = client(tmp_path, enabled=True)
-    for host in ("falcon.example.com:8000", "8.8.8.8:8000", "192.168.1.70:9999", "falcon-pc.evil.com:8000",
+    for host in ("falcon.example.com:8000", "8.8.8.8:8000", "192.0.2.70:9999", "falcon-pc.evil.com:8000",
                  "other.local:8000", "falcon-pc.local:9999"):
         assert test.post("/lan-login", data={"code": code}, headers={"host": host}).status_code == 403
 
@@ -61,10 +65,28 @@ def test_this_computers_own_name_is_accepted(tmp_path):
     assert test.get("/api/health", headers=evil).status_code == 403
 
 
+def test_home_dns_name_is_accepted_with_or_without_the_port(tmp_path):
+    app = create_app(Settings(data_dir=tmp_path / "data"))
+    app.state.lan.update(enabled=True)
+    code = app.state.lan.status()["code"]
+    test = TestClient(app, client=("198.51.100.1", 50000))
+    for host in ("falcon.lan", "falcon.lan:8000", "FALCON.LAN", "falcon.home.arpa:8000", "192.0.2.70:8000"):
+        page = test.get("/", headers={"host": host}, follow_redirects=False)
+        assert page.status_code == 303 and page.headers["location"] == "/lan-login", host
+    for host in ("falcon.lan:9999", "falcon.lan.evil.com", "evil-falcon.lan"):
+        assert test.get("/", headers={"host": host}, follow_redirects=False).status_code == 403, host
+    named = {"host": "falcon.lan"}
+    assert test.post("/lan-login", data={"code": code}, headers=named, follow_redirects=False).status_code == 303
+    assert test.get("/api/health", headers=named).status_code == 200
+    assert test.get("/api/health", headers={**named, "origin": "http://evil.example"}).status_code == 403
+    # The Phone on home Wi-Fi card leads with the name.
+    assert app.state.lan.status()["addresses"][:2] == ["http://falcon.lan", "http://falcon.lan:8000"]
+
+
 def test_new_code_signs_phones_out(tmp_path):
     app = create_app(Settings(data_dir=tmp_path / "data"))
     app.state.lan.update(enabled=True)
-    test = TestClient(app, client=("172.20.0.1", 50000))
+    test = TestClient(app, client=("198.51.100.1", 50000))
     test.post("/lan-login", data={"code": app.state.lan.status()["code"]}, headers=PHONE)
     assert test.get("/api/health", headers=PHONE).status_code == 200
     app.state.lan.update(renew_code=True)

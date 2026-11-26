@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 # Light watch log for a later summary. Checks every minute and writes a line every
 # 15 minutes to data/logs/watch-<date>.log (UTC date). Problems are written as
 # WARNING lines (and to stdout) and the watch keeps going; a warning repeats at most

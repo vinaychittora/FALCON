@@ -1,6 +1,30 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { describe, expect, it } from "vitest";
 import type { Encounter } from "./encounters";
-import { feedMark, feedName, feedScore, splitLiveFeed } from "./liveFeed";
+import { feedMark, feedName, feedScore, liveFeedFilters, splitLiveFeed } from "./liveFeed";
+import { pcClockFault, soundTone } from "../pages/LivePage";
+
+describe("the Sound light warns when this computer's clock is off", () => {
+  it("names the computer's clock and the fix, and stays quiet under 1 %", () => {
+    const fault = pcClockFault({ drift_percent: 8.4, warning: true });
+    expect(fault).toContain("this computer's clock runs about 8 % fast");
+    expect(fault).toContain("wsl --shutdown");
+    expect(pcClockFault({ drift_percent: 0.1, warning: false })).toBe("");
+    expect(soundTone(true, "listening", "", "", fault)).toBe("bad");
+  });
+});
+
+describe("the Live list asks for what Review's default view shows", () => {
+  it("leaves out one-frame glimpses, so 'N more to review' never opens an empty list", () => {
+    for (const showUnresolved of [false, true]) {
+      expect(liveFeedFilters("live-1", "all", showUnresolved).hide_glimpses).toBe(true);
+    }
+    expect(liveFeedFilters("live-1", "all", false).resolved_only).toBe(true);
+  });
+});
 
 function sound(
   id: string,

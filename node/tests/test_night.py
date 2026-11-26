@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from pathlib import Path
 
 import pytest
@@ -45,7 +49,8 @@ def test_auto_night_switches_after_three_agreeing_readings(
     agent.camera = WEBCAM
     supervisor = agent.stream
     restarts: list[bool] = []
-    monkeypatch.setattr(supervisor, "restart", lambda: restarts.append(True))
+    # The night picture restarts the camera process only, never the microphone.
+    monkeypatch.setattr(supervisor, "restart", lambda which="all": restarts.append(which == "camera"))
     monkeypatch.setattr(supervisor, "probe_path", lambda: str(tmp_path / "probe.ppm"))
     supervisor.pipeline = type("Alive", (), {"alive": lambda self: True})()  # type: ignore[assignment]
     probe = tmp_path / "probe.ppm"

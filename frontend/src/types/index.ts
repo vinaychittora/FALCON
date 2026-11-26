@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 export interface Video {
   media_kind: "video" | "image" | "audio";
   source_id: string;
@@ -79,7 +83,7 @@ interface BaseEvent {
 export interface EvidenceSummary {
   evidence_id: string;
   media_kind: "video" | "audio";
-  status: "pending" | "ready" | "partial" | "failed";
+  status: "pending" | "ready" | "partial" | "failed" | "removed";
   duration_ms: number;
   captured_at: string;
   audio_present: boolean;
@@ -124,6 +128,15 @@ export interface AudioEvent extends BaseEvent {
   common_name: string;
   confidence: number;
   model: string;
+  /** Second opinion from the cleaned sound; absent on records before 18 Nov 2026. */
+  cleaned_score?: number | null;
+  cleaned_agrees?: boolean | null;
+  /** A bout's clearest call (set from Encounter.best_confidence when the list is fetched);
+   * the tier and the card's number use it, like Live, the bell and the backend list. */
+  bout_confidence?: number | null;
+  /** A bird not recorded in Rajasthan (24 Nov 2026): an unidentified sound whose name is
+   * BirdNET's guess. Absent on older records. */
+  outside_area?: boolean | null;
 }
 export type Detection = VisualEvent | AudioEvent;
 export interface Job {

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Replay recorded detections through visit rules and check the acceptance cases.
 
 The acceptance gate of the detection-quality spec (2026-11-08):
@@ -32,6 +36,7 @@ from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import cache
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -43,8 +48,8 @@ from app.inference.still import StillObjectGuard
 from app.media.sun import sun_phase
 from app.schemas import AnalysisSettings, Candidate, Classification
 
-DATA = Path("/home/vinay/Workspace/FALCON/data")
-SITE = (25.18, 75.83)
+# The repository's own data folder (the app's default, app.config.Settings.data_dir).
+DATA = Path(__file__).resolve().parents[3] / "data"
 BOWL = (0.2, 0.61, 0.78, 1.0)
 CAT_JOB = "d14624d0-b20c-4386-8620-e2493cbcbe57"
 CAT_TAXON = 41948
@@ -253,8 +258,18 @@ def _time(value: str) -> float:
     return datetime.fromisoformat(value).timestamp()
 
 
+@cache
+def _site() -> tuple[float, float]:
+    """The site location from the app's own settings (System -> Configuration)."""
+    path = DATA / "settings.json"
+    saved = json.loads(path.read_text()) if path.exists() else {}
+    if saved.get("site_lat") is None or saved.get("site_lon") is None:
+        raise SystemExit("No site location: set it on System -> Configuration; the replay needs it for day and night.")
+    return float(saved["site_lat"]), float(saved["site_lon"])
+
+
 def _light(when: float) -> str:
-    return "night" if sun_phase(datetime.fromtimestamp(when, UTC), *SITE) == "night" else "day"
+    return "night" if sun_phase(datetime.fromtimestamp(when, UTC), *_site()) == "night" else "day"
 
 
 def records(window: tuple[str, str], database: Path = DATA / "falcon.sqlite3") -> list[Obs]:

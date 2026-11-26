@@ -6,7 +6,7 @@
 **Field Acoustic, Lens & Climate Observation Node**
 
 Developer: **Vinay Chittora**. Architecture revision **1.0**, 18 October 2026.
-Describes the inspected working source of application version 0.2.0, not a claim
+Describes the inspected working source as it stood on 18 October 2026 (before release 1.0), not a claim
 of completed field validation. See [project and code-review guide](PROJECT_GUIDE.md).
 
 ## System boundary and implementation status

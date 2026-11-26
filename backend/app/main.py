@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -11,9 +15,11 @@ from app.api import (
     exports,
     health,
     help,
+    inaturalist,
     jobs,
     live,
     nodes,
+    oauth,
     remote,
     reviews,
     sensors,
@@ -32,7 +38,10 @@ from app.security import LocalRequestPolicyMiddleware
 from app.services.analyzer import Analyzer
 from app.services.appliance import ApplianceService
 from app.services.help import HelpLibrary
+from app.services.inat_oauth import SignIn
+from app.services.inaturalist import PostingService, PostingSettings
 from app.services.live import LiveService
+from app.services.retention import RetentionJob
 from app.services.sensors import SensorHistoryProvider
 from app.services.test_sessions import TestSessionService
 from app.services.thumbnails import ThumbnailService
@@ -43,10 +52,13 @@ from app.storage.evidence import EvidenceStore
 from app.storage.jobs import JobStore
 from app.storage.jsonl import EventStore
 from app.taxonomy.inaturalist import TaxaService
+from app.viewer.process import start_viewer_server, stop_viewer_server
 from app.web import install_frontend
 
 
 def create_app(config: Settings | None = None) -> FastAPI:
+    # The friends' view server runs beside the real app only, never beside tests.
+    real = config is None
     config = config or settings
     config.prepare()
 
@@ -56,23 +68,32 @@ def create_app(config: Settings | None = None) -> FastAPI:
         app.state.test_sessions.startup()
         app.state.appliance.startup()
         app.state.nodes.start()
+        retention_job = None
+        if real:
+            start_viewer_server(config.data_dir / "private" / "viewer.log")
+            # Recording cleanup: daily at 22:00 UTC (03:30 India time).
+            retention_job = RetentionJob(app.state.database, app.state.evidence.root, config.data_dir / "logs")
+            retention_job.start()
         heartbeat = asyncio.create_task(SystemdHeartbeat(
             lambda: app.state.live.stuck_for() < STUCK_RESTART_SECONDS
         ).run())
         try:
             yield
         finally:
+            if retention_job:
+                retention_job.stop()
+            stop_viewer_server()
             heartbeat.cancel()
             app.state.nodes.stop()
             app.state.appliance.shutdown()
             app.state.test_sessions.shutdown()
             app.state.live.stop(wait=True)
 
-    app = FastAPI(title="FALCON", version="1.0.0", lifespan=lifespan)
+    app = FastAPI(title="FALCON", version="2.0.0", lifespan=lifespan)
 
     app.add_middleware(LocalRequestPolicyMiddleware, upload_limit_bytes=config.upload_limit_bytes)
     app.state.remote = RemoteAccessService(config.data_dir)
-    app.state.lan = LanAccessService(config.data_dir)
+    app.state.lan = LanAccessService(config.data_dir, names=config.lan_names)
     app.add_middleware(RemoteAccessMiddleware, service=app.state.remote, lan=app.state.lan)
     app.state.config = config
     app.state.database = Database(config.data_dir / "falcon.sqlite3")
@@ -99,8 +120,19 @@ def create_app(config: Settings | None = None) -> FastAPI:
     app.state.sensors.preferred = app.state.nodes.preferred_sensor_id
     app.state.live.night_mode = app.state.nodes.night_mode
     app.state.live.restart_stream = app.state.nodes.restart_observed_stream
+    app.state.live.restart_camera = app.state.nodes.restart_observed_camera
+    app.state.live.camera_damage_log = config.data_dir / "logs" / "camera-damage.jsonl"
     app.state.live.node_temperature = app.state.nodes.temperature
     app.state.appliance = ApplianceService(config, app.state.cameras, app.state.live, nodes=app.state.nodes)
+    app.state.posting = PostingService(
+        app.state.database, config.data_dir / "evidence", PostingSettings(config.data_dir)
+    )
+    app.state.inat_signin = SignIn(
+        config.data_dir, app.state.posting.paste_key,
+        lambda: (key.login if (key := app.state.posting.keys.get()) else None),
+    )
+    app.include_router(inaturalist.router)
+    app.include_router(oauth.router)
     app.include_router(evidence.router)
     app.include_router(exports.router)
     app.include_router(appliance.router)

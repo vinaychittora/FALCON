@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import {
@@ -13,6 +17,7 @@ import {
   type RemoteAccessState,
 } from "../api/deviceAccess";
 import Icon from "./Icon";
+import { FriendsAccess } from "./FriendsAccess";
 import "./device-access.css";
 
 export function ResourceNotice({
@@ -102,8 +107,8 @@ export function PhoneAccess() {
             </button>
           </div>
           <small>
-            Type the code once on the phone. The .local name works on iPhones
-            and recent Android phones; the number works everywhere.
+            Type the code once on each device. falcon.lan works on every device
+            that uses the Pi-hole for names; the number works everywhere.
           </small>
         </>
       )}
@@ -437,6 +442,7 @@ export default function DeviceAccess() {
           )}
         </section>
         <PhoneAccess />
+        <FriendsAccess />
       </div>
     </section>
   );

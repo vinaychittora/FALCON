@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Keeps paired sensor nodes in view: status, readings, clock and live streams.
 
 Every few seconds FALCON asks each node for its status and collects queued
@@ -93,9 +97,20 @@ class NodeManager:
             return self._snapshots.setdefault(node_id, Snapshot())
 
     def restart_observed_stream(self) -> None:
-        """Restart the observed node's stream (used when its sound track goes silent)."""
+        """Restart the observed node's sound (used when its sound track goes silent).
+
+        A node with the microphone on its own path restarts only the microphone, so the
+        picture is not touched; an older node restarts its single stream."""
         if self.observing:
-            self.client(self.observing).stream("restart")
+            with self._lock:
+                status = self._snapshots.get(self.observing, Snapshot()).status or {}
+            separate = bool((status.get("stream") or {}).get("audio_path"))
+            self.client(self.observing).stream("restart_microphone" if separate else "restart")
+
+    def restart_observed_camera(self) -> None:
+        """Restart only the observed node's camera (picture self-heal)."""
+        if self.observing:
+            self.client(self.observing).stream("restart_camera")
 
     def temperature(self) -> float | None:
         """The observed node's CPU temperature from its last status, for the night log."""
@@ -256,6 +271,13 @@ class NodeManager:
             config=config.model_copy(update={"audio_enabled": node.audio_analysis and bool(stream.get("audio"))}),
             use_saved_credentials=False, save_profile=False,
         )
+        # A node with the microphone on its own path (14 Nov 2026): sound is read from
+        # there, so the picture never holds it back. Older nodes keep one path.
+        sound_request = node_request
+        if stream.get("audio_path"):
+            sound_url = urlunsplit(("rtsp", f"{host}:{int(stream['rtsp_port'])}", "/" + str(stream["audio_path"]), "", ""))
+            sound_request = node_request.model_copy(update={"url": SecretStr(sound_url)})
+            node_request = node_request.model_copy(update={"audio_url": SecretStr(sound_request.connection_url())})
         if node.video_source != "ip":
             return node_request
         # The saved IP camera supplies the picture; this node still supplies the sound.
@@ -267,7 +289,7 @@ class NodeManager:
             username=SecretStr(profile.username) if profile.username else None,
             config=node_request.config, use_saved_credentials=True, save_profile=False,
         ))
-        return camera.model_copy(update={"audio_url": SecretStr(node_request.connection_url())})
+        return camera.model_copy(update={"audio_url": SecretStr(sound_request.connection_url())})
 
     def forget(self, node_id: str) -> None:
         self.store.delete(node_id)

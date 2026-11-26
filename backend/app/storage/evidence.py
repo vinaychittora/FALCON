@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Persist short evidence captures independently of observation reviews."""
 
 import fcntl
@@ -200,7 +204,15 @@ class EvidenceStore:
             clauses.append("e.source_id=?")
             args.append(source_id)
         if event_id:
-            clauses.append("EXISTS (SELECT 1 FROM evidence_links l WHERE l.evidence_id=e.evidence_id AND l.event_id=?)")
+            # The whole visit, not only this record: a visit's later clips (and its stay
+            # recording) are linked to later records of the same visit.
+            clauses.append(
+                "EXISTS (SELECT 1 FROM evidence_links l WHERE l.evidence_id=e.evidence_id AND l.event_id IN ("
+                "SELECT o.event_id FROM observations o, observations s WHERE s.event_id=? "
+                "AND o.source_id=s.source_id AND o.job_id=s.job_id AND (o.event_id=s.event_id OR ("
+                "json_extract(s.payload,'$.visit_id') IS NOT NULL AND "
+                "json_extract(o.payload,'$.visit_id')=json_extract(s.payload,'$.visit_id')))))"
+            )
             args.append(event_id)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         with self.database.connection() as connection:
@@ -211,9 +223,18 @@ class EvidenceStore:
                 "WHERE l.evidence_id=e.evidence_id) AS event_ids FROM evidence e" + where
                 + " ORDER BY e.captured_at DESC,e.evidence_id" + suffix, query_args,
             ).fetchall()
-        return [EvidenceRecord.model_validate({
+        records = [EvidenceRecord.model_validate({
             **json.loads(row["payload"]), "event_ids": sorted(json.loads(row["event_ids"])),
         }) for row in rows]
+        if event_id:
+            # For one visit: the longest video (a whole-stay recording) first, then the
+            # rest in time order.
+            records.sort(key=lambda r: r.captured_at)
+            videos = [r for r in records if r.media_kind == "video"]
+            if videos:
+                longest = max(videos, key=lambda r: (r.duration_ms or 0, r.requested_end_ms - r.requested_start_ms))
+                records = [longest, *[r for r in records if r is not longest]]
+        return records
 
     def recover_pending(self) -> int:
         """Explicit startup recovery, guarded against another process's live worker."""

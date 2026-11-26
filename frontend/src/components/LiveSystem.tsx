@@ -1,4 +1,9 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useState, type ReactNode } from "react";
+import SceneryView from "./SceneryView";
 import {
   emptySystemSnapshot,
   finiteNumber,
@@ -7,6 +12,7 @@ import {
   type Reading,
 } from "../api/liveSystem";
 import { wetness } from "../api/environment";
+import { rodentNights } from "../api/rodentNights";
 import { classifierLabels } from "../api/models";
 import {
   listNodes,
@@ -18,6 +24,7 @@ import { usePoll } from "../hooks/usePoll";
 import type { ClassifierMode } from "../types";
 import Icon, { type IconName } from "./Icon";
 import { formatRunDuration, formatRunNumber } from "./RunDetails";
+import RecordingsLine from "./RecordingsLine";
 import "./live-system.css";
 
 const number = (value: unknown, unit = "", whole = false) => {
@@ -590,6 +597,7 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
             memory excludes separate workers.
           </p>
         )}
+        <RecordingsLine />
       </section>
       <div className="live-system-inputs live-system-bottom">
         <Group
@@ -634,9 +642,19 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
             }
           />
           <Row
-            label="Scenery ignored"
-            value={`${Number(m.scenery_boxes) || 0} boxes${Number(m.still_object_suppressed) ? ` · ${m.still_object_suppressed} detections held back this session` : ""}`}
+            label="Camera picture"
+            value={
+              typeof m.camera_damaged_since === "string" && m.camera_damaged_since
+                ? `Damaged since ${clock(m.camera_damaged_since)} · camera restarted ${Number(m.camera_restarts) || 0}× · restart the node (Sensors → More → Restart the node)`
+                : `Whole${Number(m.broken_frames_dropped) ? ` · ${m.broken_frames_dropped} broken frames refused this session` : ""}`
+            }
           />
+          <SceneryView
+            boxes={Number(m.scenery_boxes) || 0}
+            heldBack={Number(m.still_object_suppressed) || 0}
+          />
+          <Row label="Rats and mice at night" value={rodentNights(m.rodents_recent)} />
+          <Row label="Pictures with no score at night" value={rodentNights(m.noscore_recent)} />
           <Row
             label="Processing / target rate"
             value={`${number(snapshot.processedFps, "fps")} / ${number(m.sample_fps, "fps")}`}
@@ -677,7 +695,7 @@ export function LiveSystemView({ snapshot }: { snapshot: LiveSystemSnapshot }) {
               {liveFresh !== "Current" ? "Status unavailable" : evidenceLabel}
             </Status>
           }
-          caption="5-second encounter video clips and separate audio evidence. A short rolling buffer is kept; continuous footage is not archived."
+          caption="One continuous recording per stay of an animal, with the microphone sound, and a sound record for each calling stretch. Recordings are kept or removed by the retention rules."
         >
           <Row
             label="Video clips ready"

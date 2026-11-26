@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import type { Candidate, Certainty, Detection, VisualEvent } from "../types";
 import type { Tone } from "../ui/Pill";
 import { correctedNames, type TaxonNameIndex } from "./names";
@@ -53,10 +57,61 @@ export function visualCertainty(event: VisualEvent): Certainty {
  * Certainty of a sound visit from BirdNET's confidence (its clearest call): Likely at
  * 0.60 or more (shown on Live, one bell per bout), otherwise Probable (Review only).
  * Records start at the BirdNET threshold (0.40). Fixed, not a setting (9 Nov 2026).
+ * Since 18 Nov the cleaned sound must also agree; older records have no verdict and
+ * keep the tier they had. The backend keeps the same bar (storage/jsonl.py SOUND_LIKELY,
+ * SOUND_PROBABLE_SQL): Probable bouts wait behind Review's "Show hidden".
+ * A bird not recorded in Rajasthan (outsideArea, 24 Nov 2026) is "unknown" whatever its
+ * confidence: an unidentified sound, so it rings nothing and shows only under Review's
+ * hidden places, like the backend's same rule.
  */
 export const SOUND_LIKELY = 0.6;
-export function audioCertainty(confidence: number): Certainty {
-  return confidence >= SOUND_LIKELY ? "likely" : "probable";
+export function audioCertainty(
+  confidence: number,
+  cleanedAgrees?: boolean | null,
+  outsideArea?: boolean | null,
+): Certainty {
+  if (outsideArea) return "unknown";
+  return confidence >= SOUND_LIKELY && cleanedAgrees !== false
+    ? "likely"
+    : "probable";
+}
+
+/** An unidentified sound: BirdNET named a bird not recorded in Rajasthan and nobody has
+ * named it since. Once corrected (or confirmed) it is an ordinary record. */
+export function unidentifiedSound(event: Detection): boolean {
+  return (
+    event.modality === "audio" &&
+    event.outside_area === true &&
+    event.review.status !== "corrected" &&
+    event.review.status !== "correct"
+  );
+}
+
+export const UNIDENTIFIED_SOUND = "Unidentified sound";
+
+/** The card's front line for an unidentified sound, else null:
+ * "BirdNET's guess: Great Bittern 0.71 · not recorded in Rajasthan". */
+export function soundGuessLine(event: Detection): string | null {
+  if (event.modality !== "audio" || !unidentifiedSound(event)) return null;
+  const name = event.common_name?.trim() || event.scientific_name;
+  const score = (event.bout_confidence ?? event.confidence).toFixed(2);
+  return `BirdNET's guess: ${name} ${score} · not recorded in Rajasthan`;
+}
+
+const UNIDENTIFIED_SOUND_VIEW: Omit<CertaintyView, "level"> = {
+  label: "Unidentified",
+  tone: "muted",
+  title: "BirdNET's guess is a bird not recorded in Rajasthan. Use Correct to name it.",
+};
+
+/** The plain line in a sound record's details. */
+export function cleanedSoundNote(
+  agrees: boolean,
+  score?: number | null,
+): string {
+  return agrees
+    ? `Cleaned sound agrees, ${(score ?? 0).toFixed(2)}`
+    : "Cleaned sound does not agree";
 }
 
 /** How to show a detection's certainty, or null once a reviewer has decided. */
@@ -67,10 +122,12 @@ export function certaintyOf(event: Detection): CertaintyView | null {
     event.classification.status === "non_wildlife"
   )
     return null;
+  if (unidentifiedSound(event))
+    return { level: "unknown", ...UNIDENTIFIED_SOUND_VIEW };
   const level =
     event.modality === "visual"
       ? visualCertainty(event)
-      : audioCertainty(event.confidence);
+      : audioCertainty(event.bout_confidence ?? event.confidence, event.cleaned_agrees);
   return { level, ...VIEWS[level] };
 }
 
@@ -131,6 +188,7 @@ export function leadingName(event: Detection, taxa?: TaxonNameIndex): string {
     const names = correctedNames(event, taxa);
     return names.common ?? names.scientific ?? "Corrected identification";
   }
+  if (unidentifiedSound(event)) return UNIDENTIFIED_SOUND;
   if (event.modality === "audio")
     return event.common_name?.trim() || event.scientific_name;
   const c = event.classification;

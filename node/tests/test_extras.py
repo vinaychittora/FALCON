@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from types import SimpleNamespace
 from typing import Any
 
@@ -19,6 +23,7 @@ class FakePi:
         self.hotspot = True
         self.bluetooth = False
         self.allowed = allowed
+        self.address = "IP4.ADDRESS[1]:192.0.2.1/24"
         self.commands: list[list[str]] = []
 
     def run(self, command: list[str], timeout: float = 5) -> Any:
@@ -27,6 +32,8 @@ class FakePi:
         if command[:2] == ["nmcli", "-t"]:
             names = ["Wired connection 1"] + (["falcon-hotspot"] if "--active" not in command or self.hotspot else [])
             return SimpleNamespace(returncode=0, stdout="\n".join(names) + "\n")
+        if command[:2] == ["nmcli", "-g"]:
+            return SimpleNamespace(returncode=0, stdout=self.address.split(":", 1)[1] + "\n")
         if command[:2] == ["nmcli", "connection"]:
             if not self.allowed:
                 return SimpleNamespace(returncode=4, stdout="")
@@ -56,6 +63,7 @@ def test_extras_report_state_and_switch_on_demand(node: tuple[Agent, str], pi: F
     items = {item["name"]: item for item in body["extras"]}
     assert status == 200 and items["hotspot"]["on"] and not items["bluetooth"]["on"]
     assert "disconnects any phone" in items["hotspot"]["note"] and "thermal" in body
+    assert "(http://192.0.2.1:8780/mobile)" in items["hotspot"]["note"]  # the live address, not the static text
     status, body = call(base, "PUT", "/api/v1/system/extras", {"name": "hotspot", "on": False})
     assert status == 200 and not pi.hotspot and ["nmcli", "connection", "down", "falcon-hotspot"] in pi.commands
     status, body = call(base, "PUT", "/api/v1/system/extras", {"name": "bluetooth", "on": True, "at_boot": True})
@@ -81,3 +89,18 @@ def test_extras_chosen_for_boot_start_but_are_never_switched_off(node: tuple[Age
     agent.state.extras_at_boot = {"hotspot": True, "bluetooth": False}
     agent._start_extras()
     assert pi.hotspot and not any(command[:2] == ["systemctl", "stop"] for command in pi.commands)
+
+
+def test_the_hotspot_note_shows_the_phone_page_address_while_on(pi: FakePi) -> None:
+    assert extras.state("hotspot")["note"] == (
+        "For setting up the camera from a phone (http://192.0.2.1:8780/mobile)."
+        " Turning it off disconnects any phone using it."
+    )
+    pi.hotspot = False
+    asked = len(pi.commands)
+    off = extras.state("hotspot")["note"]
+    assert off.startswith("For setting up the camera from a phone. The address of the phone page appears")
+    assert off.endswith("Turning it off disconnects any phone using it.")
+    assert not any(c[:2] == ["nmcli", "-g"] for c in pi.commands[asked:])  # no address query while off
+    pi.hotspot, pi.address = True, "IP4.ADDRESS[1]:"
+    assert extras.state("hotspot")["note"] == off  # unreadable answer: the off sentence

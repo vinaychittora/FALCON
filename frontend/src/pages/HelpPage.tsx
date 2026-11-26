@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import Icon from "../components/Icon";
@@ -67,7 +71,13 @@ export function HelpLink({
 
 const HANDBOOK_SLUGS = ["node-build", "user-handbook"];
 
-export default function HelpPage({ route }: { route: string }) {
+export default function HelpPage({
+  route,
+  onAbout,
+}: {
+  route: string;
+  onAbout?: () => void;
+}) {
   const { slug, section } = parseHelpRoute(route);
   const index = usePoll(() => api<HelpIndex>("/help"), 0);
   const isHandbook = HANDBOOK_SLUGS.includes(slug);
@@ -171,13 +181,20 @@ export default function HelpPage({ route }: { route: string }) {
             ))}
           </nav>
         )}
+        {onAbout && (
+          <nav aria-label="About">
+            <button type="button" className="help-about" onClick={onAbout}>
+              About FALCON, licence and source code
+            </button>
+          </nav>
+        )}
       </aside>
 
       <main className="help-main" ref={article}>
         {results ? (
           <section className="help-article">
             <span className="eyebrow">Search</span>
-            <h1>Results for “{query.trim()}”</h1>
+            <h2 className="help-h1">Results for “{query.trim()}”</h2>
             {!results.length && (
               <p>Nothing found. Try fewer or different words.</p>
             )}
@@ -202,7 +219,7 @@ export default function HelpPage({ route }: { route: string }) {
         ) : handbook ? (
           <section className="help-article help-handbook">
             <span className="eyebrow">Handbook</span>
-            <h1>{handbook.title}</h1>
+            <h2 className="help-h1">{handbook.title}</h2>
             <p className="lede">{handbook.summary}</p>
             <div className="help-actions">
               {handbook.pdf && (
@@ -252,7 +269,7 @@ export default function HelpPage({ route }: { route: string }) {
         ) : current ? (
           <article className="help-article">
             <span className="eyebrow">{current.section}</span>
-            <h1>{current.title}</h1>
+            <h2 className="help-h1">{current.title}</h2>
             <p className="lede">{current.summary}</p>
             {/* Server-rendered from the repository's Markdown; all text is escaped before markup is added. */}
             <div

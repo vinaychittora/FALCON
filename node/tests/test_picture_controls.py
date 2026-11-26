@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from pathlib import Path
 from typing import Any
 
@@ -107,7 +111,7 @@ def test_controls_change_live_are_saved_and_can_be_reset(
         return Result()
 
     monkeypatch.setattr(media, "run", run)
-    monkeypatch.setattr(agent.stream, "restart", lambda: restarts.append(True))
+    monkeypatch.setattr(agent.stream, "restart", lambda which="all": restarts.append(True))
     status, body = call(base, "GET", "/api/v1/camera/controls")
     assert status == 200 and len(body["controls"]) == 14 and body["saved"] == {}
     status, body = call(base, "PUT", "/api/v1/camera/controls", {"values": {"brightness": 8, "sharpness": 12}})
@@ -134,12 +138,12 @@ def test_microphone_gain_alone_applies_live_without_a_restart(
         returncode, stdout = 0, ""
 
     monkeypatch.setattr(media, "run", lambda command, **kwargs: commands.append(command) or Result())
-    monkeypatch.setattr(agent.stream, "restart", lambda: restarts.append(True))
+    monkeypatch.setattr(agent.stream, "restart", lambda which="all": restarts.append(which == "microphone"))
     status, _ = call(base, "PUT", "/api/v1/microphone", {"audio_gain_percent": 40})
     assert status == 200 and not restarts
     assert commands == [["amixer", "-q", "-c", "Zero", "sset", "Mixin PGA", "40%"]]
     status, _ = call(base, "PUT", "/api/v1/microphone", {"audio_channel": "right"})
-    assert status == 200 and restarts == [True]  # the channel changes the pipeline
+    assert status == 200 and restarts == [True]  # the channel changes the microphone process only
 
 
 def test_picture_controls_need_a_usb_webcam(node: tuple[Agent, str]) -> None:

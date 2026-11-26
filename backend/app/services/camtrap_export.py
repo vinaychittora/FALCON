@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Clean research export in Camera Trap Data Package format (Camtrap DP 1.0).
 
 Camtrap DP (https://camtrap-dp.tdwg.org) is the TDWG exchange standard for
@@ -224,7 +228,12 @@ def _identity(event: Event) -> tuple[str, str | None, str | None]:
     if status == "corrected":
         return "animal", event.review.corrected_scientific_name, event.review.corrected_common_name
     if isinstance(event, AudioEvent):
-        return ("unknown", None, None) if status == "unknown" else ("animal", event.scientific_name, event.common_name)
+        if status == "unknown":
+            return "unknown", None, None
+        # An unidentified sound (a bird not recorded in Rajasthan): BirdNET's name is a guess.
+        if event.outside_area and status != "correct":
+            return "animal", None, None
+        return "animal", event.scientific_name, event.common_name
     classification = event.classification
     if classification.status == "non_wildlife":
         label = (event.detector.label or "").lower()

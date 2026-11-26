@@ -1,8 +1,13 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { wetness } from "../api/environment";
 import { captureTime } from "../api/observations";
 import Icon from "./Icon";
+import WeatherGraph from "./WeatherGraph";
 import "./sensor-history.css";
 
 export interface Reading {
@@ -27,7 +32,36 @@ const measurement = (value: number | null) =>
     ? "—"
     : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
+/** Environmental history: a graph, with the raw readings one click away. */
 export default function SensorHistory() {
+  const [table, setTable] = useState(false);
+  return (
+    <section className="sensor-history" aria-labelledby="environment-heading">
+      <header>
+        <div>
+          <h2 id="environment-heading">
+            <Icon name="activity" /> Environmental history
+          </h2>
+          <p>
+            Temperature, humidity and rain at the camera. Readings older than a
+            day are kept every 10 minutes, and whenever rain starts or stops or
+            the weather changes quickly.
+          </p>
+        </div>
+        <button
+          className="quiet"
+          aria-pressed={table}
+          onClick={() => setTable((value) => !value)}
+        >
+          {table ? "Graph" : "Table"}
+        </button>
+      </header>
+      {table ? <SensorTable /> : <WeatherGraph />}
+    </section>
+  );
+}
+
+function SensorTable() {
   const [snapshot, setSnapshot] = useState<{
     offset: number | null;
     history: History;
@@ -86,6 +120,7 @@ export default function SensorHistory() {
       error={loading ? "" : snapshot.error}
       onRefresh={() => setRefresh((value) => value + 1)}
       onPage={setOffset}
+      embedded
     />
   );
 }
@@ -97,6 +132,7 @@ export function SensorHistoryView({
   error,
   onRefresh,
   onPage,
+  embedded = false,
 }: {
   history: History;
   offset: number;
@@ -104,22 +140,29 @@ export function SensorHistoryView({
   error: string;
   onRefresh: () => void;
   onPage: (offset: number) => void;
+  /** Inside the graph section: the readings without their own heading. */
+  embedded?: boolean;
 }) {
   return (
     <section
-      className="sensor-history"
-      aria-labelledby="sensor-history-heading"
+      className={embedded ? "sensor-history sensor-table" : "sensor-history"}
+      aria-labelledby={embedded ? undefined : "sensor-history-heading"}
+      aria-label={embedded ? "Sensor readings" : undefined}
     >
       <header>
-        <div>
-          <h2 id="sensor-history-heading">
-            <Icon name="activity" /> Environmental history
-          </h2>
-          <p>
-            Periodic measurements, including intervals without wildlife
-            detections.
-          </p>
-        </div>
+        {embedded ? (
+          <p>Every stored reading, newest first.</p>
+        ) : (
+          <div>
+            <h2 id="sensor-history-heading">
+              <Icon name="activity" /> Environmental history
+            </h2>
+            <p>
+              Periodic measurements, including intervals without wildlife
+              detections.
+            </p>
+          </div>
+        )}
         <button
           className="quiet"
           aria-label="Refresh environmental history"
