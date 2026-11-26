@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Local SQLite authority; JSON/JSONL files remain compatible export mirrors."""
 
 import os
@@ -77,6 +81,11 @@ class Database:
             connection.execute(
                 "CREATE TABLE IF NOT EXISTS legacy_import_offsets ("
                 "path TEXT PRIMARY KEY, imported_bytes INTEGER NOT NULL)"
+            )
+            # Records removed on purpose (rats and mice at night): never imported again.
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS purged_events ("
+                "event_id TEXT PRIMARY KEY, purged_at TEXT NOT NULL, reason TEXT NOT NULL)"
             )
 
     @contextmanager

@@ -13,7 +13,7 @@ third-party data or the user's recordings. These are separate artifacts and perm
 | OpenCLIP | `open_clip_torch` 3.3.0 | [MIT source license](https://github.com/mlfoundations/open_clip/blob/main/LICENSE). |
 | BirdNET Analyzer source | `birdnet-analyzer` 2.4.0 | MIT source code; see [upstream licensing](https://github.com/birdnet-team/BirdNET-Analyzer#license). |
 | BirdNET weights | GLOBAL 6K V2.4 plus metadata model from V2.4.zip | **CC BY-NC-SA 4.0** per [BirdNET upstream](https://github.com/birdnet-team/BirdNET-Analyzer#license). Noncommercial model terms are separate from source-code MIT terms. Commercial deployment requires addressing these terms or replacing the adapter with appropriately licensed weights. |
-| iNaturalist | Aggregate taxonomy/species-count metadata now; optional photos later | Media belongs to contributors and has individual licenses. [iNaturalist licensing guidance](https://help.inaturalist.org/en/support/solutions/articles/151000175695) distinguishes observation, photo and sound licenses. No images were downloaded. Future data tooling defaults to photo-level CC0, CC BY and CC BY-SA and retains attribution. |
+| iNaturalist | Aggregate taxonomy and species-count metadata for the regional species list (built by `make taxa`, not stored in this repository); posting a visit the user confirmed or corrected, only when the user presses Post, with the user's own account and key | Media belongs to contributors and has individual licenses. [iNaturalist licensing guidance](https://help.inaturalist.org/en/support/solutions/articles/151000175695) distinguishes observation, photo and sound licenses. No images are downloaded. FALCON sets no license on a posted observation; it uploads the pictures and sound the user chose. |
 | Frontend | React, Vite, TypeScript and original CSS/text | No stock images, downloaded fonts or third-party illustration assets are bundled. Package licenses remain their own; see lockfile/package notices. System fonts are used. |
 | Media tooling | FFmpeg GPL build from BtbN, PyAV | The selected [BtbN build](https://github.com/BtbN/FFmpeg-Builds) has its own GPL notices under `.tools/ffmpeg/LICENSE.txt`; [FFmpeg licensing](https://ffmpeg.org/legal.html) depends on build options. Do not redistribute the binary under the application's license. PyAV has its own [BSD license](https://github.com/PyAV-Org/PyAV/blob/main/LICENSE.txt). |
 | Sensor node stream server | MediaMTX v1.21.2, downloaded by `node/install.sh` and checked against its SHA-256 | [MIT](https://github.com/bluenviron/mediamtx/blob/main/LICENSE); its LICENSE is installed next to the binary. Not stored in this repository. |
@@ -21,6 +21,38 @@ third-party data or the user's recordings. These are separate artifacts and perm
 | Camtrap DP | Table schemas and profile referenced by URL in exports | [Camtrap DP](https://github.com/tdwg/camtrap-dp) by TDWG, MIT. |
 | Manufacturer drawings | Raspberry Pi, Camera Module 3 and Waveshare mechanical drawings and schematics, used to design the enclosure | Copyright of their makers. They are not part of this repository (`hardware/manufacturer-references/` is ignored by Git); download them from the makers' own sites. |
 | User samples | Original media supplied by the operator | User-provided content, not included in Git and not relicensed by this project. |
+
+## Species lists: sources and terms
+
+Two text files in `backend/app/inference/` decide which birds FALCON names by sound:
+
+- `birdnet_north_india.txt`: the BirdNET labels of every bird that BirdNET's own range
+  model expects, in any week of the year, somewhere in North India, defined in the script
+  as rough boxes around Jammu and Kashmir, Ladakh, Himachal Pradesh, Uttarakhand, Punjab, Haryana,
+  Chandigarh, Delhi, Uttar Pradesh, Rajasthan, Madhya Pradesh and Gujarat. BirdNET listens
+  for all of these.
+- `birdnet_rajasthan.txt`: the BirdNET labels of the birds on the regional species list
+  (Rajasthan, India). Only these are named; other calls are kept as *Unidentified sound*.
+
+The two lists in this release are built for that region. Another region needs the two list
+scripts changed.
+
+How they are made: `scripts/birdnet_north_india.py` reads BirdNET's label file
+(`BirdNET_GLOBAL_6K_V2.4_Labels.txt`, which comes with the BirdNET V2.4 model checkpoints)
+and asks BirdNET's range model which of those birds are expected in the region.
+`scripts/birdnet_rajasthan.py` keeps the labels whose species are among the birds of the
+locally built regional taxa file `data/taxa/rajasthan_taxa.json`. Both scripts run in the
+BirdNET environment.
+
+The lists are derived from BirdNET's labels. They are third-party-derived data and are not
+relicensed by this project. BirdNET's terms, as stated above: the BirdNET
+Analyzer source code is MIT (see [upstream licensing](https://github.com/birdnet-team/BirdNET-Analyzer#license));
+the BirdNET weights (GLOBAL 6K V2.4 plus metadata model) are **CC BY-NC-SA 4.0** per
+[BirdNET upstream](https://github.com/birdnet-team/BirdNET-Analyzer#license).
+
+The regional taxa file is not shipped. `make taxa` builds it from iNaturalist
+research-grade aggregates through the official iNaturalist API (see the iNaturalist row
+above and [taxa-coverage.md](development/taxa-coverage.md)).
 
 PyTorchWildlife's installed dependency tree includes additional packages, including
 Ultralytics/YOLO dependencies with their own licenses. Selecting the MIT MegaDetector

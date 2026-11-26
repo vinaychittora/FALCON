@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Durable, review-independent evidence records."""
 
 from datetime import UTC, datetime
@@ -20,7 +24,8 @@ class EvidenceRecord(BaseModel):
     session_id: str
     job_id: str
     media_kind: Literal["video", "audio"]
-    status: Literal["pending", "ready", "partial", "failed"] = "pending"
+    # "removed": the media was thinned after 60 days (retention.py); the record stays.
+    status: Literal["pending", "ready", "partial", "failed", "removed"] = "pending"
     relative_path: str | None = None
     captured_at: str
     requested_start_ms: int = Field(ge=0)

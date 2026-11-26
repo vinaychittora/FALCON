@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """A cleaned copy of a saved sound clip, for listening in Review (owl calls at night).
 
 Never used for BirdNET and never replaces the saved clip. One gentle mode:
@@ -7,7 +11,7 @@ Never used for BirdNET and never replaces the saved clip. One gentle mode:
    measured in the 200-4,000 Hz band and never from frames within 6 dB of the loudest
    (so a soft call is not taken for noise); the gate mask is smoothed in time (about
    100 ms) and frequency (about 750 Hz) and noise is lowered by about 12 dB, not
-   removed. A hard gate made the "watery" musical noise Vinay heard on 10 Nov.
+   removed. A hard gate made a "watery" musical noise (heard on 10 Nov 2026).
 3. level: raised by at most +20 dB, then a soft limiter at -1 dBFS (no clipping).
 Also a spectrogram picture (0-8 kHz) of the clip.
 """

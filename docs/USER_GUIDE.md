@@ -23,18 +23,16 @@ Watch the sensor and check detections while they happen.
    almost the same), **red** a faint best guess (shown with a question mark), **gray**
    unknown. The box shows only the name; the scores are in the card and the side panel.
    Detections that say nothing yet (no species, no group) are kept in the archive but
-   hidden from the picture and the list; switch on **Show unresolved** under the picture
-   to see them. The heading counts the visits and species of this session and how many
-   unresolved detections are hidden.
+   not shown on Live; find them on Review with **Show hidden**. The heading counts the
+   visits and species of this session.
 4. Check each card with one click:
 
    | Button | Key | Meaning |
    | --- | --- | --- |
    | Confirm | C | The suggested species is right |
-   | Correct | E | Choose the right species (type a common or scientific name) |
+   | Correct | R | Choose the right species (type a common or scientific name) |
    | Unsure | U | An animal, but the species is not clear |
-   | Not an animal | X | Wrong detection: leaves, shadow, a person, a vehicle |
-   | Discard | D | Not useful: a duplicate, blurred or empty clip. Hidden and never exported |
+   | Discard | D | No animal, or not useful: a duplicate, blurred or empty recording. Hidden and never exported |
    | Details | Enter | Open the review dialog: evidence and facts on the left, decision on the right |
 
    Click a card first (or Tab to it) to use the keys. A decision applies to every frame of
@@ -58,20 +56,87 @@ with human voices are silenced in saved sound clips. Nothing extra has to be swi
 To see people as filmed (for example while setting up the camera), turn off **Mask people
 in video** in Settings. People are still never recorded as observations.
 
+**Status line.** One line under the top bar (inside the bar on a wide screen) always says
+what is going on: **Connected**, **Loading…** with a thin moving bar while something you
+asked for is on its way, **FALCON is slow to answer…** after 5 seconds, **Can't reach
+FALCON since** a time when two checks in a row fail, or **This device has no network.**
+Short confirmations such as "2 reviews saved" appear there for 3 seconds, and an open
+record or the posting panel on a phone shows the same states in its own top bar.
+
+**Recordings.** Each stay at the bowl is one continuous video with sound, from 5 s
+before the animal is first seen until 15 s pass without it (files of at most 10 minutes
+follow each other without a gap); a calling bird gets one sound recording for the whole
+calling stretch. How long they are kept: visits you **Confirm** or **Correct** keep their
+recordings for good; **Discard** loses its recording one to two hours after your choice
+(an hourly pass removes what was decided more than an hour ago; until then Undo brings it
+back); everything else after 60 days. The record, its picture
+(for sound, the spectrogram) and all details stay, with one exception: a record FALCON hid
+by itself (Review → Status → Hidden) that you have not reviewed 7 days after capture is
+cleared completely, record and recording. Hidden (N) and Show hidden (N) show how many are
+waiting. System shows the space used.
+
+*Technical note: sound and picture.* The sensor node sends the camera and the microphone
+as two separate streams, so a camera hiccup never interrupts the sound. FALCON lines them
+up on the time they arrive, corrected by a small constant for the capture path (sound
+about 23 ms from the encoder and sound card, picture about 15 ms from USB and decoding):
+estimated once per rig, about 8 ms, no user step. Live warns on its Sound indicator when
+the microphone delivers more than 1 % off its rate.
+
+**Friends (view only).** Under System → Device access, invite a friend by name and email;
+they get a 10-letter code (shown once) for the view-only page, which shows the live
+picture once a second, recognised animals and their video clips: no sound, settings or
+anything hidden. The friends' picture pauses while a person is in view, whatever Mask
+people is set to. **Withdraw** stops an invitation at once; *Who viewed what* lists
+sign-ins and clips played. The page runs on this computer (port 8081) and is not on the
+internet until a Cloudflare or Tailscale front door is set up.
+
 ## Review
 
 Go through everything recorded, in a chosen time window.
 
 - **Filters:** time (last 24 hours, 7 days, 30 days, all, or custom from/to), status
-  (To review, Confirmed, Corrected, Unsure, Not an animal, Discarded, or all), video or
+  (To review, Hidden, Confirmed, Unsure, Discarded, or All), video or
   sound, and species name. **More** adds field-or-test recordings, a single session, a
-  minimum model score and **Show unresolved** (detections with no species and no group,
-  hidden by default; the heading says how many are hidden).
+  minimum model score and **Show hidden (N)**: detections with no species and no group,
+  one-frame glimpses, and Probable sound records (best BirdNET confidence under 0.60, or
+  the cleaned sound disagrees), hidden by default; N says how many. Hiding deletes nothing, but what FALCON hid and
+  you have not reviewed is cleared 7 days after capture (see **Recordings** under Live); once you
+  review a sound record it is always listed. **Unidentified only** lists just the
+  unreviewed picture visits the model gave no species, hidden ones included, so you can
+  name them by hand; turn on Show hidden as well to add one-frame glimpses. Night insects
+  and the rats and mice removed at night stay out. Status **Hidden** lists only what FALCON
+  hid by itself and you have not reviewed (exactly what Show hidden adds to To review);
+  the two switches do nothing while it is chosen.
 - **One visit at a time:** use the same buttons and keys as on Live. **J** and **K** move
   to the next and previous card.
+- **One card per stay:** when several animals are at the water in the same recording,
+  Review shows them as one card: a head with the time span, and one row per animal. Each
+  animal keeps its own decision. Animals FALCON hid in that stay sit behind the line
+  *N more that FALCON hid in this stay*. Every number still counts visits, not cards. In
+  the recording every box carries its name, and the chips under the player
+  (*Name 09:37*) choose the animal: the recording jumps to it, its box turns bold, and the
+  line above the buttons says which animal they act on.
+- **Unidentified sound:** a sound gets a bird's name only if that bird is recorded in
+  Rajasthan. Any other sound is kept as *Unidentified sound*, with BirdNET's guess, under
+  Hidden for you to review; **Correct** offers the guess first. It rings no bell, cannot
+  be posted until you correct it, and is cleared after 7 days if you do not review it.
+- **Post to iNaturalist:** a visit you confirmed or corrected to a species can be posted to
+  iNaturalist with your own account. Pasting a key from inaturalist.org/users/api_token
+  always works; the key lasts 24 hours and FALCON keeps it in memory only, until it
+  restarts. **Sign in to iNaturalist** (on this computer, http://localhost:8000) needs an
+  iNaturalist application of your own, registered at inaturalist.org/oauth/applications as
+  a non-confidential application with the redirect address http://localhost:8000/oauth/cb;
+  enter its Application ID once under **Set up sign-in** on the posting page. Open the visit with
+  **Post to iNaturalist**, choose 1 to 3 pictures (suggested frames, or frames picked from
+  the recording, with an optional crop) and/or include the trimmed sound, check the
+  description, and press **Post**: one press sends one observation. The page shows how
+  many were posted today out of 20 a day. A posted visit leaves the list, says it is
+  already on iNaturalist, and cannot be posted twice. The location is the node's camera
+  spot, shown publicly only as an obscured area.
 - **Many at once:** tick cards (or press **Space**), or *Select all on this page*, then use
-  the bar that appears: Confirm, Set species…, Unsure, Not an animal, Discard, or reset to
-  "to review".
+  the bar that appears: Confirm, Correct, Unsure, Discard, or Reset to "to review". When the list has more pages, *Select all N in this list* takes every page;
+  the bar then counts the records as they are saved, and **Undo** takes back the whole
+  action.
 - Every decision is stored with the time and the previous decision (an audit trail); the
   original model output is never overwritten. Discarded visits stay in the audit trail but
   are hidden unless you choose the Discarded filter, and are never exported.
@@ -153,14 +218,14 @@ research-grade observations for your region (`make taxa ARGS='--place "Kerala, I
 
 - **Live status:** camera and sound input, inference delay, saved clips, weather freshness,
   and this computer's CPU, GPU, memory and storage.
-- **Configuration:** analysis settings: species model, detector, species and group
-  thresholds, frames analyzed per second, region of interest, small-animal mode, fixed
-  camera mode (motion proposals), bird-call confidence and the site location used by
-  BirdNET. Every setting has an **i** button: hover or tap it for what the setting does,
-  what changing it affects and what it costs in processing. Save, then start a new
-  observation to use the new values.
+- **Configuration:** Mask people, Forget scenery, sound analysis on or off, and the site
+  location, used for day and night and by BirdNET (it narrows only the birds of the local
+  list that are outside North India; every North India bird is listened for all year). The analysis tuning (BioCLIP 2.5, detector 0.50, 3 % picture
+  edges ignored, 3 frames a second, thresholds, one recording per stay) is fixed for this rig
+  and listed on the page. Saving restarts a running observation so changes apply now.
 - **Model status:** which models are loaded and on which device.
-- **Device access:** private remote access through Tailscale and the startup service.
+- **Device access:** private remote access through Tailscale, phone on home Wi-Fi,
+  Friends (view only) and the startup service.
 
 ## Help
 
@@ -192,5 +257,15 @@ text size and higher contrast.
 - *Unknown bird* (or mammal, reptile…) means the strongest candidates agree on the group
   even though the species is unclear. *Unknown organism* means not even that is clear.
 - The detector was trained on camera-trap photographs of mammals and birds. Insects and
-  other very small animals are often not detected at all; **Fixed camera mode** adds
-  motion-based boxes for them when the camera does not move.
+  other very small animals are often not detected at all, and at night insects are never
+  named.
+- Rats and mice at night are not kept: between sunset and sunrise, a visit whose card shows
+  a rat or mouse name (any rat, mouse or bandicoot-rat, or "Mouse or rat (species
+  uncertain)") leaves no record, recording or bell; while it is still going on it is
+  hidden as "Rat or mouse at night". A visit whose card shows another name is kept, and so
+  is one you confirmed, corrected, marked unsure or posted. Gerbils and jirds are kept.
+  System → Rats and mice at night shows how many were not kept on the last two nights. By
+  day nothing changes.
+- In full darkness (not dawn or dusk), a picture visit where the camera model gave no
+  species score on any frame is not kept either, unless you judged or posted it; System →
+  Pictures with no score at night counts them.

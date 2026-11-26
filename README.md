@@ -6,11 +6,12 @@ microphones and weather sensors, analyzed locally.
 FALCON watches a place for animals. A **sensor node** (a Raspberry Pi with a camera,
 microphones, a temperature/humidity/pressure sensor and a rain plate) streams what it sees
 and hears. An **inference node** (a PC, mini PC or laptop) finds animals in the video,
-suggests the species, identifies bird calls, saves a short clip of each visit and records
-the weather at that moment. You check the results in a web page, correct them with one
-click, and export a clean dataset in the Camtrap DP standard for researchers.
+suggests the species, identifies bird calls, records each stay of an animal and notes the
+weather at that moment. You check the results in a web page, correct them with one click,
+and export a clean dataset in the Camtrap DP standard for researchers.
 
-Everything runs on your own hardware. No video, sound or records go to a cloud service.
+Everything runs on your own hardware. No video, sound or records go to a cloud service
+unless you post a visit to iNaturalist yourself.
 
 ```mermaid
 flowchart LR
@@ -23,7 +24,7 @@ flowchart LR
   subgraph inference[Inference node: PC or mini PC]
     falcon[FALCON] --> md[MegaDetector + BioCLIP: animals and species]
     falcon --> bn[BirdNET: bird calls]
-    falcon --> db[(Observations, clips, weather)]
+    falcon --> db[(Observations, recordings, weather)]
     db --> ui[Web interface: live, review, export]
   end
   falcon -- reads stream --> stream
@@ -31,20 +32,40 @@ flowchart LR
 ```
 
 The two can sit side by side at a remote site (one Ethernet cable, no internet needed), or
-apart: the node in the garden and the computer indoors on the home network.
+apart: the node outdoors and the computer indoors on the home network.
 
 ## What it does
 
-- **Live view** with detection boxes, and a feed of animal visits you can confirm, correct,
-  mark unsure, reject or discard while they happen (keyboard shortcuts included).
-- **Review** by time window, species, status, session and score; one decision covers all
-  frames of a visit; bulk actions; every decision is audited, model output is never overwritten.
+- **Live view** with detection boxes, and a feed of animal visits you can Confirm, Correct,
+  mark Unsure or Discard as they happen.
+- **Review** by time window, species, status, session and score. Each visit gets one of
+  Confirm, Correct (choose the right species), Unsure or Discard, with an optional note;
+  one decision covers all frames of a visit, bulk actions cover many. Every decision is
+  audited; model output is never overwritten.
+- **Hidden status**: visits FALCON sets aside by itself (glimpses, still objects, small or
+  uncertain detections, unidentified sounds) wait under *Hidden* in Review. Those you do not
+  review within 7 days are cleared.
+- **Recordings**: one continuous recording per stay of an animal, from 5 seconds before the
+  first detection until 15 seconds pass with nothing detected, with the microphone sound
+  merged in. A sound record covers the whole stretch in which a bird keeps calling.
+  Pictures, crops and spectrograms appear on every review card.
+- **Sound names**: BirdNET listens twice, to the sound as received and to a cleaned copy;
+  the cleaned pass is a second opinion. Birds are named by sound only if they are on the
+  regional list; other calls are kept as *Unidentified sound* for review. The two sound
+  lists in this release are built for North India (the birds BirdNET listens for) and
+  Rajasthan (the birds it names).
+- **Retention**: recordings of visits you Confirm or Correct are kept. Recordings of
+  discarded visits are removed one to two hours after the decision, all others after
+  60 days; the record, its picture and its details stay. Visits FALCON hid by itself that
+  you never reviewed are cleared completely after 7 days.
+- **Post to iNaturalist**: a confirmed or corrected visit is posted only when you press
+  Post, with your own iNaturalist account and key. You choose the pictures and the sound.
+- **Status line**: one line under the top bar says when a page is loading, when FALCON is
+  slow to answer, and when the connection is lost.
+- **Phone layout**: every page works on a phone, with records opening full screen.
 - **Sensor node control** from the web page: start/stop the stream, switch the camera,
   microphone, weather sensor and rain plate on or off, focus, exposure, white balance, HDR,
   resolution and more, node health (temperature, power, storage, Wi-Fi, clock), restart.
-- **Evidence**: 10-second video clips of each visit (one at arrival, then one every
-  10 seconds while the animal stays) and WAV clips of bird calls, with crops and
-  spectrograms on every review card. No continuous recording.
 - **Weather** every 30 seconds, attached to each detection, kept even when the network drops.
 - **Export** a time window as a Camtrap DP 1.0 package (GBIF, Agouti, Wildlife Insights,
   R `camtrapdp`), with verified-only, verified-plus-unreviewed or everything-but-discarded.
@@ -52,6 +73,16 @@ apart: the node in the garden and the computer indoors on the home network.
   no internet, restarts a stalled analysis.
 - **Media tests**: try it on any photo, video or sound recording.
 - Private remote access through Tailscale.
+
+## What is new in FALCON 2.0
+
+- One continuous recording per stay with the microphone sound, instead of 10-second clips.
+- Review with Confirm, Correct, Unsure, Discard and notes, a Hidden status and a phone layout.
+- Clearing of hidden visits after 7 days, and the retention rules above.
+- Posting confirmed visits to iNaturalist on your own press, with your own key.
+- Sound names limited to the regional bird list, and two-pass listening.
+- One status line for loading, slow answers and a lost connection.
+- Licence: AGPL version 3 with additional terms (see below).
 
 ## Quick start
 
@@ -70,7 +101,8 @@ make start            # then open http://127.0.0.1:8000
 `make taxa` builds the list of species FALCON chooses from, using iNaturalist research-grade
 records. The default region is Rajasthan, India. For your region:
 `make taxa ARGS='--place "Kerala, India"'` (any iNaturalist place name or ID); add
-`--include-domestic` to label livestock and pets correctly. Details: [docs/INSTALL.md](docs/INSTALL.md).
+`--include-domestic` to label livestock and pets correctly. It then also builds the groups
+used for group-level names such as "Cat (species uncertain)". Details: [docs/INSTALL.md](docs/INSTALL.md).
 
 ### 2. A sensor
 
@@ -94,7 +126,7 @@ wiring, power (USB-C or PoE), 3D-printed enclosure and assembly step by step. Pr
 STL/STEP files, drawings and the parametric CAD model are in [hardware/](hardware/).
 
 The enclosure is a design for the Raspberry Pi Camera Module 3 and has not been printed yet.
-Build 1 runs in a plastic junction box with a USB infrared webcam (see [Status](#status)).
+The node in use runs in a plastic junction box with a USB infrared webcam (see [Status](#status)).
 
 ## Documentation
 
@@ -114,12 +146,15 @@ All of these are also inside FALCON: open **Help** in the menu (with search acro
 
 ## How the identification works
 
-MegaDetector finds animals, people and vehicles in sampled frames (2 per second by
+MegaDetector finds animals, people and vehicles in sampled frames (3 per second by
 default). A tracker follows each animal. BioCLIP 2 or BioCLIP 2.5 compares the best crops of
 a track with the names on the local species list; a cross-check mode needs both models to
-agree. BirdNET listens to 9-second sound windows on the CPU, filtered to the local bird list
-and, if the site location is set, to the date and place. People and vehicles are not saved
-as animals.
+agree. BirdNET listens on the CPU in 3-second windows for every bird of North India
+(Jammu and Kashmir, Ladakh, Himachal Pradesh, Uttarakhand, Punjab, Haryana,
+Chandigarh, Delhi, Uttar Pradesh, Rajasthan, Madhya Pradesh and Gujarat), in any week of
+the year; the site location, if set, only narrows the birds of the local species list that
+are outside that region. FALCON names only birds on the regional list (Rajasthan in this
+release). People and vehicles are not saved as animals.
 
 The scores rank candidates; visual similarity is not a probability, and a visit is not a
 count of individuals. Treat unreviewed results as suggestions. Small, distant or hidden
@@ -143,14 +178,18 @@ Direct pushes to `main` are refused.
 ## Status
 
 FALCON is a working prototype. Build 1 (tag `v1.0`) was put together between 27 October and
-10 November 2026 in a backyard in Kota, Rajasthan, and its node has watched one water bowl
-there since the evening of 7 November 2026. The sensor node is a Raspberry Pi 4 with a USB
-infrared webcam, the audio HAT, a BME280 and a rain plate in a plastic junction box on one
-PoE cable. The inference node is a Windows PC (WSL2) with an NVIDIA GPU.
+10 November 2026 in a backyard in Kota, Rajasthan; build 2 (release 2.0) followed in November
+2026. Its node has watched one water bowl there since the evening of 7 November 2026. The sensor node is a Raspberry Pi 4 with a
+USB infrared webcam, the audio HAT, a BME280 and a rain plate in a plastic junction box on
+one PoE cable. The inference node is a Windows PC (WSL2) with an NVIDIA GPU.
 
 Not done yet: the 3D-printed enclosure in [hardware/](hardware/) has never been printed,
-Jetson packaging is not done, and the Camtrap DP export validates against the standard but
-has not been loaded into anyone else's tools. What Build 1 recorded, and where it falls
+Jetson packaging is not done, the Camtrap DP export validates against the standard but
+has not been loaded into anyone else's tools, the bird-sound lists are built for North
+India and Rajasthan (another region needs the two list scripts changed), and a view-only
+page for invited friends (System → Device access → Friends (view only)) is included but
+has not been tried with real viewers; it listens only on this computer until a Cloudflare
+or Tailscale front door is set up. What the builds recorded, and where they fall
 short, is described on the [project page](https://mhtr.in/falcon/).
 
 ## License and credits

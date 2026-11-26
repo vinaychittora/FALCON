@@ -1,0 +1,671 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
+/* Posting: one visit at a time, pictures chosen and cropped by the owner. */
+.pp-layout {
+  align-items: start;
+}
+
+/* Build 4 (25 Nov): Review's look. A compact top, the list in Review's cards, and the
+   record panel with its own top, a body that scrolls and the Post footer always in view. */
+.posting-page {
+  display: grid;
+  gap: 12px;
+}
+.pp-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 18px;
+}
+.pp-top:empty {
+  display: none;
+}
+.pp-top-line {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.pp-top-line b,
+.pp-top-line strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.pp-top-line svg {
+  flex: none;
+  color: var(--success);
+}
+.pp-key {
+  display: grid;
+  gap: 8px;
+}
+.pp-key-h {
+  margin: 0;
+  font-size: 16px;
+}
+.pp-key p {
+  margin: 0;
+  font-size: 14px;
+}
+.pp-list-h {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pp-cards {
+  margin-top: 10px;
+}
+.pp-unnamed .pp-cards {
+  margin: 0;
+  padding: 0 12px 12px;
+}
+.pp-covers,
+.pp-link-note {
+  margin: 12px 0 0;
+}
+.pp-forget {
+  min-height: 44px;
+}
+@media (min-width: 900px) {
+  .posting-page .pp-layout {
+    grid-template-columns: minmax(340px, 400px) minmax(0, 1fr);
+  }
+  /* The list column holds one card per row. */
+  .pp-list .rl-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 899px) {
+  .posting-page .pp-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* The record panel */
+.posting-preview.pp-panel {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  gap: 0;
+}
+.pp-top-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 52px;
+  padding: 4px 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-subtle);
+}
+.pp-top-bar .rv-icon:first-child {
+  margin-left: -12px;
+}
+.pp-top-bar .rv-position {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  line-height: 1.3;
+}
+.pp-top-bar .rv-position span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pp-top-bar .first {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.pp-top-bar .second {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.pp-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 12px 16px 20px;
+}
+.pp-identity .rv-sci {
+  font-style: italic;
+  color: var(--muted);
+  font-size: 14px;
+}
+.pp-meta {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.pp-section {
+  display: grid;
+  gap: 8px;
+}
+.pp-section .posting-description {
+  margin: 0;
+}
+/* The record popup's small section headings */
+.pp-h,
+.pp-pictures h3.pp-h {
+  margin: 0;
+  font: 600 12px/1.4 Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pp-foot {
+  flex: none;
+  display: grid;
+  gap: 8px;
+  padding: 10px 16px max(12px, env(safe-area-inset-bottom, 0px));
+  background: var(--surface);
+  border-top: 1px solid var(--line-subtle);
+}
+.pp-foot .banner {
+  margin: 0;
+}
+.pp-foot-line {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.pp-foot-line.pp-ready {
+  color: var(--ink);
+  font-weight: 600;
+}
+.pp-foot-line.pp-reason {
+  color: var(--ink);
+}
+.pp-posted {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+  color: var(--ink);
+  font-weight: 600;
+}
+.pp-posted svg {
+  color: var(--success);
+}
+.pp-posted a {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+}
+.pp-post {
+  min-height: 48px;
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+/* Wide screens: the panel column stays in view while the page scrolls; its body
+   scrolls inside it and the footer sits at its bottom. */
+@media (min-width: 900px) {
+  /* The panel starts about 144 px down (bar and the two top lines), so it is that much
+     shorter than the screen: its footer is in view before and after scrolling. */
+  .pp-side {
+    position: sticky;
+    top: 76px;
+    height: calc(100vh - 160px);
+    height: calc(100dvh - 160px);
+    min-height: 420px;
+  }
+  .pp-side > .pp-panel {
+    height: 100%;
+  }
+  .pp-side > .posting-empty {
+    margin: 0;
+    padding: 24px;
+  }
+  .pp-post {
+    width: auto;
+    justify-self: start;
+    padding: 0 24px;
+  }
+  .pp-foot {
+    padding-bottom: 12px;
+  }
+}
+/* Phone: the panel fills the screen (the layer); the footer is its last row. */
+.pp-layer > .pp-panel {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.pp-layer .pp-top-bar {
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.pp-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+.pp-row {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 56px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.pp-row:hover {
+  background: var(--surface-hover);
+}
+.pp-row[aria-current="true"] {
+  background: var(--surface-muted);
+  border-color: var(--accent-fill);
+  box-shadow: inset 3px 0 0 var(--accent-fill);
+}
+/* A row without a picture of its own keeps the same width as the others. */
+.pp-row .pp-thumb {
+  width: 64px;
+  height: 48px;
+  border-radius: 6px;
+  background: var(--media-surface);
+}
+.pp-row:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.pp-row img {
+  width: 64px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--media-surface);
+}
+.pp-row span {
+  display: grid;
+  min-width: 0;
+}
+.pp-row strong {
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.pp-row small {
+  font-size: 13px;
+  color: var(--muted);
+}
+.pp-pictures {
+  display: grid;
+  gap: 8px;
+}
+.pp-pictures h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+.pp-note,
+.pp-count,
+.pp-crop-help {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pp-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: stretch;
+}
+.pp-thumb {
+  position: relative;
+  display: grid;
+  gap: 4px;
+  width: 136px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  text-align: left;
+}
+.pp-thumb img {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--media-surface);
+}
+.pp-thumb[aria-pressed="true"] {
+  border-color: var(--accent-fill);
+  box-shadow: inset 0 0 0 1px var(--accent-fill);
+  color: var(--ink);
+}
+.pp-thumb svg {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  padding: 2px;
+  border-radius: 50%;
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+.pp-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 14px;
+}
+.pp-chosen {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr));
+  gap: 12px;
+}
+.pp-chosen-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.pp-zoom {
+  padding: 0;
+  border: 0;
+  background: var(--media-surface);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.pp-zoom img {
+  display: block;
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+}
+.pp-chosen-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pp-chosen-actions {
+  display: inline-flex;
+  gap: 6px;
+}
+.pp-btn {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--ink);
+  font-size: 14px;
+}
+.pp-btn:disabled {
+  opacity: 0.5;
+}
+.pp-mark {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+/* Crop tool */
+.pp-crop-body {
+  display: grid;
+  gap: 12px;
+  padding-block: 12px 16px;
+  overflow-y: auto;
+}
+.pp-crop-frame {
+  position: relative;
+  width: 100%;
+  max-height: 70vh;
+  margin-inline: auto;
+  background: #000;
+  border-radius: 8px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+.pp-crop-frame img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.pp-crop-area {
+  position: absolute;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+  cursor: move;
+  touch-action: none;
+}
+.pp-crop-area:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.pp-handle {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 3px solid #fff;
+  background: rgba(0, 0, 0, 0.3);
+  touch-action: none;
+}
+.pp-handle.nw { left: -14px; top: -14px; cursor: nwse-resize; }
+.pp-handle.ne { right: -14px; top: -14px; cursor: nesw-resize; }
+.pp-handle.sw { left: -14px; bottom: -14px; cursor: nesw-resize; }
+.pp-handle.se { right: -14px; bottom: -14px; cursor: nwse-resize; }
+/* the 28 px handle carries a 44 px hit area */
+.pp-handle::after {
+  content: "";
+  position: absolute;
+  inset: -8px;
+}
+.pp-crop-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+/* Phone: the chosen visit as a full-screen step with Back */
+.pp-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--cream);
+}
+.pp-layer-top {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 16px 0 4px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-subtle);
+  font-weight: 600;
+  font-size: 16px;
+}
+.pp-layer-top span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pp-layer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 16px 24px;
+}
+
+/* 44 px targets for the key field and the posted links */
+.posting-page .posting-key input,
+.posting-page .posting-key button {
+  min-height: 44px;
+}
+.posting-page .posting-done a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
+
+/* Sign-in on the PC, with the paste box as the other way */
+.pp-signin {
+  min-height: 48px;
+  padding: 0 20px;
+  justify-self: start;
+}
+.pp-paste > summary {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 14px;
+}
+.pp-setup {
+  display: grid;
+  gap: 8px;
+}
+.pp-setup h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.posting-page .pp-setup input,
+.posting-page .pp-setup button {
+  min-height: 44px;
+}
+
+/* A chosen picture that could not be loaded: a sentence and Retry, never a broken image */
+.pp-failed {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  font-size: 14px;
+  color: var(--ink);
+}
+.pp-failed p {
+  margin: 0;
+}
+
+/* Where the visit lies in the recording */
+.visit-span {
+  position: relative;
+  height: 10px;
+  margin: 6px 0 2px;
+  border-radius: 5px;
+  background: var(--surface-hover);
+}
+.visit-span-range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 5px;
+  background: var(--accent-fill);
+}
+.visit-span-now {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 16px;
+  background: var(--ink);
+}
+.visit-span-words,
+.visit-outside {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.visit-outside {
+  color: var(--warning);
+  font-weight: 600;
+}
+.filmstrip-tile.outside {
+  opacity: 0.35;
+}
+
+.sound-trim-note {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+/* the picker's own buttons get 44 px targets */
+.frame-picker .posting-actions button {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* 44 px targets on the rest of the panel */
+.posting-preview .posting-actions .primary,
+.posting-preview .sound-trim input[type="number"],
+.posting-preview .sound-trim .switch-row {
+  min-height: 44px;
+}
+.posting-preview .sound-trim .switch-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.posting-preview .sound-trim .switch-row input[type="checkbox"] {
+  width: 22px;
+  height: 22px;
+}
+.posting-preview .sound-trim-handle {
+  min-height: 44px;
+}
+
+.pp-mark-outside {
+  background: var(--warning-surface);
+  color: var(--ink);
+  border: 1px solid var(--warning-line);
+}
+.pp-outside-line {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--warning);
+}

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import threading
 from fractions import Fraction
 from pathlib import Path
@@ -101,7 +105,11 @@ def test_archive_api_filters_and_validates_before_pagination(tmp_path: Path) -> 
     robin = event()
     app.state.events.append(robin)
     for _ in range(3):
-        app.state.events.append(event("Spotted Owlet", "b" * 24))
+        owlet = event("Spotted Owlet", "b" * 24)
+        owlet.classification.scientific_name = "Athene brama"
+        for candidate in owlet.classification.top_k:
+            candidate.scientific_name = "Athene brama"
+        app.state.events.append(owlet)
     with TestClient(app) as client:
         result = client.get("/api/detections", params={"q": "magpie robbin", "limit": 1})
         assert result.status_code == 200

@@ -1,4 +1,8 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Put the FALCON sensor node on a freshly written Raspberry Pi OS SD card.
 
 1. Write Raspberry Pi OS Lite (64-bit) with Raspberry Pi Imager. In Imager's

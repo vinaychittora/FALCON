@@ -1,5 +1,10 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import type { Encounter } from "./encounters";
 import { thumbnailUrl } from "./encounters";
+import { UNIDENTIFIED_SOUND, unidentifiedSound } from "./certainty";
 
 /** "Ring on detection": a short bell and, optionally, a desktop notification. */
 export type BellPreferences = {
@@ -58,7 +63,9 @@ export function saveBellPreferences(value: BellPreferences): boolean {
 export function visitName(encounter: Encounter): string {
   const event = encounter.event;
   if (event.modality === "audio")
-    return event.common_name || event.scientific_name;
+    return unidentifiedSound(event)
+      ? UNIDENTIFIED_SOUND
+      : event.common_name || event.scientific_name;
   return (
     event.classification.common_name ||
     event.classification.scientific_name ||

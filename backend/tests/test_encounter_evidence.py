@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Encounter integration uses synthetic pixels/PCM and a real temporary database."""
 
 import hashlib
@@ -300,7 +304,7 @@ def test_audio_clip_has_real_five_second_pcm_hash_and_session_offsets(capture):
 
 
 def test_sound_clip_spans_neighbouring_windows_five_before_five_after(tmp_path, monkeypatch):
-    """Vinay's setting: 5 s before and 5 s after the first call, across 9-second windows."""
+    """The rig's setting: 5 s before and 5 s after the first call, across 9-second windows."""
     monkeypatch.setattr(module, "EvidenceRecorder", Recorder)
     database = Database(tmp_path / "records.sqlite3")
     store = EvidenceStore(database, tmp_path / "evidence")

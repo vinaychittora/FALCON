@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import os
 from pathlib import Path
 from typing import Literal
@@ -22,6 +26,9 @@ class Settings(BaseSettings):
     sensor_stale_after_seconds: float = Field(default=120, gt=0, le=86400)
     upload_limit_bytes: int | None = Field(default=None, gt=0)
     device: Literal["auto", "cuda", "cpu"] = "auto"
+    # Names the home DNS (Pi-hole) points at this computer; phones may use them for
+    # FALCON. Change in .env as LAN_NAMES='["falcon.lan"]'.
+    lan_names: list[str] = ["falcon.lan", "falcon.home.arpa"]
 
     def prepare(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True, mode=0o700)

@@ -1,7 +1,15 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { PictureControl } from "../api/nodes";
-import PictureControls, { controlLabel, menuLabel } from "./PictureControls";
+import PictureControls, {
+  controlLabel,
+  GOOD_PICTURE,
+  menuLabel,
+} from "./PictureControls";
 
 const exposure: PictureControl = {
   name: "auto_exposure",
@@ -27,6 +35,17 @@ describe("webcam picture controls", () => {
       "zoom absolute",
     );
     expect(controlLabel({ ...exposure, name: "sharpness" })).toBe("Sharpening");
+  });
+
+  it("restores the picture that worked at the water bowl", () => {
+    expect(GOOD_PICTURE).toMatchObject({
+      brightness: 0,
+      contrast: 11,
+      saturation: 75,
+      gamma: 102,
+      gain: 17,
+      backlight_compensation: 66,
+    });
   });
 
   it("shows a loading state before the node answers", () => {

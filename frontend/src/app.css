@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
 /* FALCON application shell and pages. Colors come from the tokens in style.css. */
 :root {
   --sidebar-width: 248px;
@@ -187,7 +193,8 @@ body {
   gap: 20px;
   flex-wrap: wrap;
 }
-.page-header h1 {
+.page-header h1,
+.page-header .page-h1 {
   margin: 0 0 4px;
   font-size: 1.625rem;
   font-weight: 650;
@@ -292,6 +299,35 @@ body {
 .toast {
   max-width: 1500px;
   margin: 0 auto 14px;
+}
+.floating-toast {
+  position: fixed;
+  z-index: 80;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(420px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  animation: toast-in 0.16s ease-out;
+}
+.floating-toast button {
+  width: 100%;
+  min-height: 48px;
+  justify-content: space-between;
+  border-color: var(--success-line);
+  border-radius: 10px;
+  background: var(--success-surface);
+  color: var(--ink);
+  text-align: left;
+  box-shadow: 0 6px 20px var(--shadow-modal);
+}
+.floating-toast button:hover:not(:disabled) {
+  background: var(--success-surface);
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
 }
 
 /* ---- Controls ---- */
@@ -628,6 +664,111 @@ kbd {
   flex: 1 1 auto;
   aspect-ratio: auto;
 }
+/* Phone held sideways in full screen: the picture at full height in the middle,
+   status down the left, switches down the right. Each side column is at least 80 px;
+   on a wider-than-16:9 screen it takes the room the picture leaves free. */
+.live-stage.is-fullscreen.side-layout {
+  --side: max(80px, calc((100vw - 100vh * 16 / 9) / 2));
+  display: grid;
+  grid-template-columns: var(--side) minmax(0, 1fr) var(--side);
+  grid-template-rows: 100vh;
+  overflow: hidden;
+}
+.side-layout .player.live-preview,
+.side-layout .stage-placeholder {
+  grid-column: 2;
+  grid-row: 1;
+  height: 100vh;
+  min-width: 0;
+}
+.side-layout .player .live-indicator {
+  display: none;
+}
+.side-layout .player.live-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+.side-layout .player.live-preview {
+  min-height: 0;
+}
+.side-layout .player.live-preview img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+/* The words carry the meaning in the narrow column; the small icons are left out. */
+.fs-side .sound-indicator svg {
+  display: none;
+}
+.fs-actions .switch-row {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.fs-side {
+  grid-row: 1;
+  height: 100vh;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 8px;
+  background: var(--surface);
+  font-size: 0.75rem;
+}
+.fs-status {
+  grid-column: 1;
+}
+.fs-actions {
+  grid-column: 3;
+}
+.fs-side .live-indicator.fs-live {
+  position: static;
+  align-self: flex-start;
+}
+.fs-side .sound-indicator,
+.fs-side .switch-row {
+  gap: 6px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+.side-layout .fullscreen-button {
+  position: static;
+  align-self: flex-end;
+}
+.fs-info {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.fs-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fs-facts .fact {
+  padding: 0;
+  border: 0;
+}
+.fs-facts .fact strong {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  font-size: 0.75rem;
+}
+.fs-actions > * {
+  max-width: 100%;
+}
 .sensor-links,
 .sensor-tabs {
   display: flex;
@@ -695,29 +836,45 @@ kbd {
   align-items: center;
   gap: 6px;
 }
-.bar-options > summary {
-  list-style: none;
+.bar-options-button {
   cursor: pointer;
   padding: 0 6px;
+  border: 0;
   border-radius: 6px;
+  background: none;
+  font: inherit;
+  line-height: 1.4;
   color: var(--muted);
 }
-.bar-options > summary::-webkit-details-marker {
-  display: none;
-}
-.bar-options[open] > summary,
-.bar-options > summary:hover {
+.bar-options-button[aria-expanded="true"],
+.bar-options-button:hover {
   background: var(--surface-hover);
   color: var(--ink);
 }
+/* Menus and tooltips float over the whole page (placed by ui/Floating.tsx, always fully
+   on screen), so the Live picture's frame can no longer cut them off (14 Nov). */
+.bar-popover,
+.hover-tip {
+  position: fixed;
+  z-index: 1000;
+}
+.hover-tip {
+  pointer-events: none;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 24px));
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 0.8125rem;
+  line-height: 1.35;
+  box-shadow: 0 6px 18px var(--shadow-modal);
+}
 .bar-popover {
-  position: absolute;
-  z-index: 30;
-  bottom: calc(100% + 8px);
-  left: 0;
   display: grid;
   gap: 10px;
-  width: 220px;
+  width: min(220px, calc(100vw - 24px));
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -853,6 +1010,306 @@ kbd {
 }
 .sound-indicator.tone-bad i {
   background: var(--live);
+}
+.sound-indicator.tone-warn i {
+  background: var(--warning);
+}
+
+/* Review: the note row under a card after a decision */
+.encounter-note-row {
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+}
+.encounter-note-row input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.encounter-note-row small {
+  color: var(--muted);
+}
+
+.post-hint {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.post-hint small {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+/* iNaturalist posting */
+.posting-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 340px) minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 800px) {
+  .posting-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  /* On a phone the chosen visit's preview comes before the long list. */
+  .posting-previews {
+    order: -1;
+  }
+  .posting-empty {
+    display: none;
+  }
+}
+.posting-key p {
+  margin: 0 0 8px;
+}
+.posting-key .inline-form input {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+.posting-list ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.posting-list li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+.posting-list li img {
+  width: 48px;
+  height: 48px;
+  object-fit: cover;
+  border-radius: 6px;
+  flex: none;
+}
+.posting-list li span {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.posting-list li small {
+  color: var(--muted);
+}
+.posting-done li {
+  padding: 4px 0;
+}
+.posting-previews {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.posting-preview h2 {
+  margin: 0;
+}
+.posting-description {
+  display: grid;
+  gap: 4px;
+  margin: 8px 0;
+}
+.posting-preview textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font: inherit;
+}
+.posting-frames {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(200px, 100%), 1fr));
+  gap: 10px;
+  margin: 12px 0;
+}
+.posting-frame {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  opacity: 0.55;
+  cursor: pointer;
+}
+.posting-frame.on {
+  opacity: 1;
+}
+.posting-frame img {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--line);
+}
+.posting-frame figcaption {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+.posting-zoom {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.88);
+  cursor: zoom-out;
+}
+.lightbox img {
+  max-width: 100vw;
+  max-height: 100vh;
+  object-fit: contain;
+}
+.lightbox-close {
+  position: fixed;
+  top: 10px;
+  right: 14px;
+  font-size: 1.6rem;
+  background: none;
+  border: 0;
+  color: #fff;
+}
+.frame-picker {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+  outline: none;
+}
+.frame-picker video {
+  width: 100%;
+  max-height: 60vh;
+  background: #000;
+  border-radius: 6px;
+}
+.filmstrip {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+.filmstrip-tile {
+  flex: none;
+  width: 160px;
+  height: 90px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 4px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  position: relative;
+}
+.filmstrip-tile.detected::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--forest);
+}
+.filmstrip-tile.active {
+  border-color: var(--warning);
+}
+.sound-trim {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+.sound-trim-view {
+  position: relative;
+  height: 120px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #000;
+}
+.sound-trim-view.off {
+  opacity: 0.45;
+}
+.sound-trim-view img {
+  width: 100%;
+  height: 100%;
+  object-fit: fill;
+  display: block;
+}
+.sound-trim-heard {
+  position: absolute;
+  top: 0;
+  height: 8px;
+  background: var(--forest);
+}
+.sound-trim-chosen {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-left: 2px solid var(--warning);
+  border-right: 2px solid var(--warning);
+  background: rgba(228, 197, 141, 0.18);
+  pointer-events: none;
+}
+.sound-trim-handle {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  width: 100%;
+  margin: 0;
+  background: transparent;
+  pointer-events: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.sound-trim-handle::-webkit-slider-thumb {
+  pointer-events: auto;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--warning);
+  cursor: ew-resize;
+}
+.sound-trim-handle::-moz-range-thumb {
+  pointer-events: auto;
+  width: 16px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--warning);
+  cursor: ew-resize;
+}
+.sound-trim-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.sound-trim-fields input {
+  width: 5.5em;
+}
+.sound-trim audio {
+  width: 100%;
+}
+.posting-sound {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+.posting-sound audio {
+  max-width: 100%;
+}
+.posting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.camera-spot .inline-form input {
+  flex: 1 1 200px;
+  min-width: 0;
 }
 .facts {
   display: grid;
@@ -1097,6 +1554,16 @@ kbd {
 .encounter-card[data-status="unknown"],
 .encounter-card[data-status="mixed"] {
   box-shadow: inset 3px 0 0 var(--warning);
+}
+.encounter-card:focus-visible,
+.encounter-card[data-status]:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+}
+.review-queue-button {
+  min-height: 44px;
+  align-self: center;
+  white-space: nowrap;
 }
 .encounter-card[data-status="discarded"] {
   opacity: 0.6;
@@ -1471,7 +1938,8 @@ kbd {
   z-index: 5;
   top: calc(100% + 6px);
   left: 0;
-  min-width: 250px;
+  min-width: min(250px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   display: flex;
   flex-direction: column;
   padding: 6px;
@@ -2386,3 +2854,6 @@ h1 .help-link {
   min-height: 0;
   padding: 6px;
 }
+
+/* Seen and heard at the same time (one line on a visit card). */
+.encounter-crosslink { margin: 0.25rem 0 0; font-size: 0.8rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
 .saved-evidence {
   margin: 1rem 0;
 }
@@ -39,24 +45,47 @@
   width: auto;
   max-width: 100%;
 }
+/* Same colours as Live: green Confirmed/Likely, orange Probable, grey fainter. This
+   visit's animal is drawn full; other animals in the recording thin. */
 .clip-box {
+  --tone: #d8dddf;
   position: absolute;
-  border: 2px solid #f5d76e;
+  border: 1px solid var(--tone);
   border-radius: 3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
   pointer-events: none;
+  opacity: 0.75;
+}
+.clip-box.tone-likely { --tone: #b9e77a; }
+.clip-box.tone-probable { --tone: #f3b35b; }
+.clip-box.tone-faint { --tone: #d8dddf; }
+.clip-box.own {
+  border-width: 2px;
+  opacity: 1;
+}
+.clip-box.label-below b {
+  bottom: auto;
+  top: 100%;
+  margin: 2px 0 0;
+  border-radius: 3px;
 }
 .clip-box b {
   position: absolute;
   left: -2px;
   bottom: 100%;
-  padding: 1px 6px;
-  background: #f5d76e;
-  color: #1b1b1b;
-  font-size: 0.75rem;
+  margin-bottom: 2px;
+  padding: 0 5px;
+  background: rgba(24, 37, 30, 0.6);
+  color: var(--tone);
+  border-radius: 3px;
+  font-size: 0.68rem;
   font-weight: 600;
   white-space: nowrap;
-  border-radius: 3px 3px 0 0;
+}
+/* Every box carries its name (24 Nov); the chosen animal's name is the strong one. */
+.clip-box:not(.own) b {
+  font-size: 0.62rem;
+  font-weight: 500;
 }
 .saved-evidence audio {
   display: block;
@@ -252,3 +281,64 @@
   border-radius: 6px;
   background: var(--surface-2, #111);
 }
+
+/* Where this visit's animal is in a longer recording, and the visit's other pieces. */
+.clip-span {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.35rem 0.9rem 0;
+  height: 1.4rem;
+}
+.clip-span-track {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.clip-span-track span {
+  position: absolute;
+  top: -1px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--forest);
+}
+.clip-span-track i {
+  position: absolute;
+  top: -4px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  background: var(--ink, currentColor);
+}
+.clip-span button {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+}
+.evidence-pieces {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+.evidence-pieces button {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+.evidence-pieces button[aria-current="true"] {
+  border-color: var(--forest);
+  background: var(--surface-muted, rgba(0, 0, 0, 0.06));
+  font-weight: 600;
+}
+
+.clip-boxes-switch { margin: 0.35rem 0.9rem 0; font-size: 0.8rem; }

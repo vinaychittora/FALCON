@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import json
 import threading
 import urllib.request
@@ -36,8 +40,11 @@ def test_jpegs_are_split_whole_and_the_rest_is_kept() -> None:
 
 
 def test_live_picture_is_offered_on_the_hotspot_and_this_node_only() -> None:
-    assert focus.allowed("10.42.0.23") and focus.allowed("127.0.0.1") and focus.allowed("::ffff:10.42.0.9")
-    assert not focus.allowed("192.168.1.20") and not focus.allowed("not-an-ip")
+    # Hosts of the configured hotspot network (the IPv4 network in the list that is not loopback).
+    hotspot = next(net for net in focus.ALLOWED_NETWORKS if net.version == 4 and not net.is_loopback)
+    host, other = str(hotspot.network_address + 23), str(hotspot.network_address + 9)
+    assert focus.allowed(host) and focus.allowed("127.0.0.1") and focus.allowed("::ffff:" + other)
+    assert not focus.allowed("192.0.2.20") and not focus.allowed("not-an-ip")
 
 
 def test_reader_reads_the_local_stream_without_audio_and_three_outputs() -> None:
@@ -74,7 +81,8 @@ def phone(tmp_path: Path) -> Iterator[tuple[FakeHelper, str]]:
     helper = FakeHelper()
     server = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(agent, helper))  # type: ignore[arg-type]
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield helper, f"http://127.0.0.1:{server.server_address[1]}"
+    port = server.server_address[1]
+    yield helper, f"http://127.0.0.1:{port}"
     server.shutdown()
 
 

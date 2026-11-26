@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import numpy as np
 from numpy.typing import NDArray
 
@@ -308,7 +312,7 @@ def classify_models(
     config: AnalysisSettings,
     detail: str | None = None,
 ) -> Classification:
-    """Classify each model independently, requiring two qualified matches for agreement."""
+    """Classify with the species model and record its evidence (model and version)."""
     specs = classifier_specs(config.classifier_mode)
     decisions = [classify_label(scores.get(spec.key), taxa, config, detail) for spec in specs]
     primary = decisions[0]
@@ -324,48 +328,4 @@ def classify_models(
         )
         for spec, decision in zip(specs, decisions, strict=True)
     ]
-    if config.classifier_mode != "ensemble":
-        return primary
-    qualified = all(decision.status == "candidate" for decision in decisions)
-    top_ids = [decision.top_k[0].taxon_id if decision.top_k else None for decision in decisions]
-    if qualified and top_ids[0] == top_ids[1]:
-        primary.consensus = "agree"
-        return primary
-    primary.status = "unknown"
-    primary.scientific_name = None
-    primary.common_name = None
-    if any(decision.broad_group != primary.broad_group for decision in decisions):
-        primary.broad_group = "organism"
-    group_name = GROUP_NAMES.get(primary.broad_group, "organism")
-    strong = [d for d in decisions if d.top_k and d.top_k[0].score >= config.species_threshold]
-    if all(taxon_id is not None for taxon_id in top_ids) and top_ids[0] != top_ids[1]:
-        primary.consensus = "disagree"
-        primary.unknown_reason = "Models suggest different species"
-    else:
-        primary.consensus = "insufficient_evidence"
-        primary.unknown_reason = "Both models must provide an unambiguous species match"
-    if detail:
-        primary.unknown_reason = f"{detail}; {primary.unknown_reason}"
-        primary.certainty, primary.genus, primary.contenders = "unknown", None, []
-        primary.display_label = f"Unknown {group_name}"
-    elif len(strong) == len(decisions):
-        # Both models are confident but not about the same name: between those names.
-        seen: dict[int, Candidate] = {}
-        for decision in decisions:
-            for candidate in decision.contenders or decision.top_k[:1]:
-                seen.setdefault(candidate.taxon_id, candidate)
-        contenders = sorted(seen.values(), key=lambda c: -c.score)[:3]
-        genera = {genus_of(c.scientific_name) for c in contenders}
-        primary.certainty = "probable"
-        primary.genus = genera.pop() if len(genera) == 1 else None
-        primary.contenders = contenders
-        primary.display_label = _display_name(contenders[0])
-    elif primary.top_k and primary.top_k[0].score >= config.group_threshold:
-        primary.certainty = "possible"
-        primary.genus = None
-        primary.contenders = primary.top_k[:1]
-        primary.display_label = f"{_display_name(primary.top_k[0])}?"
-    else:
-        primary.certainty, primary.genus, primary.contenders = "unknown", None, []
-        primary.display_label = f"Unknown {group_name}"
     return primary

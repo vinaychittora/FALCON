@@ -1,0 +1,391 @@
+/*
+ * Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+ * This program is free software: you can redistribute it and/or modify it under the terms of the
+ * GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+ * the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+ */
+/* Live: picture first, then the switches and the state, then what came by.
+   Full screen keeps its own layout (.is-fullscreen rules in app.css). */
+
+.live-page.lv {
+  display: block;
+  max-width: none;
+}
+.lv-a {
+  min-width: 0;
+}
+.lv-stage:not(.is-fullscreen) {
+  margin: -16px -16px 0;
+  padding: 0;
+  border-radius: 0;
+  border: 0;
+  background: var(--media-surface);
+  overflow: visible;
+}
+.lv-frame {
+  position: relative;
+  width: min(100%, calc((100vh - 150px) * 16 / 9));
+  width: min(100%, calc((100dvh - 150px) * 16 / 9));
+  margin-inline: auto;
+  background: #000;
+}
+.lv-frame .player.live-preview {
+  border: 0;
+  border-radius: 0;
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+/* The whole camera picture inside the 16:9 frame (as in full screen; boxes follow it). */
+.lv-frame .player.live-preview img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  max-height: none;
+  aspect-ratio: auto;
+  object-fit: contain;
+}
+.lv-frame .stage-placeholder {
+  aspect-ratio: 16 / 9;
+  min-height: 0;
+}
+.lv-frame-fs {
+  display: contents;
+}
+.lv-full {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 3;
+}
+.lv-full .fullscreen-button {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 0 0 0 10px;
+  background: var(--media-overlay);
+  color: var(--media-text);
+}
+.lv-tools {
+  display: flex;
+  justify-content: flex-start;
+  column-gap: 24px;
+  align-items: center;
+  gap: 8px;
+  min-height: 45px;
+  padding: 0 max(16px, env(safe-area-inset-left, 0px));
+  background: var(--surface);
+  border-bottom: 1px solid var(--line-subtle);
+}
+.lv-tools .switch-row,
+.lv-tools .bar-control {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--ink);
+}
+.lv-tools .bar-control .switch-row {
+  min-height: 44px;
+}
+.lv-tools .bar-control button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* State line: what is happening, then camera and microphone, then Stop or Start */
+.lv-st {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px 12px;
+  align-items: center;
+  padding-block: 10px;
+}
+.lv-st-a {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+.lv-time {
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.lv-st-b {
+  grid-column: 1;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.lv-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  vertical-align: 1px;
+  background: var(--muted);
+}
+.lv-dot.tone-good {
+  background: var(--success);
+}
+.lv-dot.tone-warn {
+  background: var(--warning);
+}
+.lv-dot.tone-bad {
+  background: var(--danger);
+}
+.lv-dot.tone-off {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--muted);
+}
+.lv-warn {
+  margin: 0 0 8px;
+}
+.lv-st-act {
+  grid-row: 1 / span 2;
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: 50vw;
+}
+.lv-st-act select {
+  min-height: 44px;
+  max-width: 180px;
+  font-size: 16px;
+}
+.lv-stop {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  border: 1px solid var(--danger-line);
+  background: var(--danger-surface);
+  color: var(--danger);
+  font-weight: 600;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.lv-stop.lv-start {
+  border-color: var(--accent-fill);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+
+/* Station now and the node's controls: labelled expands */
+.lv-xp {
+  border: 1px solid var(--line-subtle);
+  border-radius: var(--radius);
+  background: var(--surface);
+  margin-top: 8px;
+}
+.lv-xp > summary {
+  min-height: 48px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 12px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.lv-xp-t {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--ink);
+}
+.lv-xp-s {
+  font-size: 13px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.lv-kv {
+  margin: 0;
+  padding: 4px 12px 12px;
+  display: grid;
+  gap: 8px;
+}
+.lv-kv > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  font-size: 14px;
+}
+.lv-kv dt {
+  color: var(--muted);
+}
+.lv-kv dd {
+  margin: 0;
+  color: var(--ink);
+}
+.lv-node {
+  padding: 0 12px 12px;
+  display: grid;
+  gap: 10px;
+}
+.lv-node .sensor-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.lv-node .text-button,
+.lv-node .component-toggle {
+  min-height: 44px;
+}
+
+/* This session */
+.lv-b {
+  min-width: 0;
+}
+.lv-sec-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  margin-top: 14px;
+}
+.lv-sec-h h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.lv-seg {
+  display: inline-grid;
+  grid-auto-flow: column;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  flex: none;
+}
+.lv-seg button {
+  min-height: 44px;
+  min-width: 56px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+.lv-seg button + button {
+  border-left: 1px solid var(--line);
+}
+.lv-seg button[aria-pressed="true"] {
+  background: var(--surface-hover);
+  color: var(--ink);
+  font-weight: 600;
+}
+.lv-count {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+.lv-b .rl-cards {
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  align-items: start;
+}
+.lv-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 8px;
+  margin-top: 8px;
+}
+.lv-links .tlink:first-child {
+  margin-left: -10px;
+}
+.lv-about {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+@media (min-width: 900px) {
+  .lv-stage:not(.is-fullscreen) {
+    margin: 0;
+    border-radius: var(--radius);
+    overflow: hidden;
+    border: 1px solid var(--line-subtle);
+  }
+  .lv-frame {
+    width: min(100%, calc((100vh - 230px) * 16 / 9));
+    width: min(100%, calc((100dvh - 230px) * 16 / 9));
+  }
+}
+@media (min-width: 1200px) {
+  .live-page.lv {
+    display: grid;
+    /* The picture takes its space first; the session list gets the rest (at least 360). */
+    grid-template-columns:
+      minmax(480px, min(calc(100% - 384px), calc((100dvh - 230px) * 16 / 9)))
+      minmax(360px, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .live-page.lv > .banner,
+  .live-page.lv > .empty-state {
+    grid-column: 1 / -1;
+  }
+  .lv-frame {
+    width: 100%;
+  }
+  .lv-sec-h {
+    margin-top: 0;
+  }
+}
+@media (orientation: landscape) and (max-height: 540px) and (min-width: 560px) and (max-width: 899px) {
+  .live-page.lv {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  .live-page.lv > .banner,
+  .live-page.lv > .empty-state {
+    grid-column: 1 / -1;
+  }
+  .lv-frame {
+    width: 100%;
+  }
+  .lv-stage:not(.is-fullscreen) {
+    margin: 0;
+  }
+  .lv-sec-h {
+    margin-top: 4px;
+  }
+}
+
+/* Stream stats on a phone: smaller and less dominant, on two short lines */
+@media (max-width: 599px) {
+  .lv-frame .stage-info {
+    left: 6px;
+    bottom: 6px;
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 12px;
+    line-height: 1.25;
+  }
+  /* two short lines: the time, then frame rate and picture size */
+  .lv-frame .stage-info > span {
+    display: block;
+  }
+  .lv-frame .stage-info-dot {
+    display: none;
+  }
+}

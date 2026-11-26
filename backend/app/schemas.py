@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from datetime import date
 from string import Formatter
 from typing import Annotated, Literal
@@ -34,14 +38,40 @@ class VideoCatalog(BaseModel):
 
 Unit = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
 BBox = tuple[Unit, Unit, Unit, Unit]
-ClassifierMode = Literal["bioclip_2", "bioclip_2_5", "ensemble"]
+# "ensemble" (both models cross-checking) was removed on 10 Nov 2026; old saved
+# settings and jobs that name it are read as BioCLIP 2.5.
+ClassifierMode = Literal["bioclip_2", "bioclip_2_5"]
+
+
+# Tuning fixed at the values that work on this rig (10 Nov 2026 clean-up). They stay
+# fields so file tests, replays and the CPU fallback can vary them, but saved settings
+# and the Configuration page never change them: load_analysis_settings resets them.
+FIXED_SETTINGS = (
+    "sample_fps", "species_threshold", "group_threshold", "ambiguity_margin",
+    "likely_similarity", "likely_margin", "mixed_groups", "scenery_forget_hours",
+    "likely_frames", "detector_size", "max_proposals", "fixed_camera", "small_animal_mode",
+    "birdnet_confidence", "sound_bout_gap_seconds", "sound_bout_max_minutes",
+    "clip_pre_seconds", "clip_post_seconds", "flicker_step", "flicker_flips_per_minute",
+    "flicker_hold_seconds", "still_object_minutes", "recording_date", "week", "device",
+    "log_non_wildlife", "min_crop_side", "min_sharpness", "crops_per_track",
+    "prompt_templates", "max_seconds",
+)
+# Chosen for this rig (10 Nov 2026): fixed too, but not the schema defaults that
+# file tests rely on. The 3 % edges keep the pillar out of the picture.
+RIG_SETTINGS: dict[str, object] = {
+    "detector_threshold": 0.5,
+    "roi": (0.03, 0.0, 0.97, 1.0),
+    "crop_left_percent": 0,
+    "crop_right_percent": 0,
+    "classifier_mode": "bioclip_2_5",
+}
 
 
 class AnalysisSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    sample_fps: float = Field(default=2, ge=0.5, le=5)
+    sample_fps: float = Field(default=3, ge=0.5, le=5)
     detector_threshold: float = Field(default=0.25, ge=0.01, le=0.99)
-    species_threshold: float = Field(default=0.22, ge=-1, le=1)
+    species_threshold: float = Field(default=0.33, ge=-1, le=1)
     # Below the species threshold, a lower bar still allows "unknown bird / mammal"
     # when the strongest candidates agree on the group.
     group_threshold: float = Field(default=0.15, ge=-1, le=1)
@@ -58,13 +88,13 @@ class AnalysisSettings(BaseModel):
     scenery_forget_hours: float = Field(default=48.0, ge=1, le=720)
     # A visit is "Likely" only when this many sampled frames agree on the species.
     likely_frames: int = Field(default=3, ge=1, le=20)
-    detector_size: Literal[320, 640, 960] = 640
-    max_proposals: int = Field(default=12, ge=1, le=50)
+    detector_size: Literal[320, 640, 960] = 960
+    max_proposals: int = Field(default=10, ge=1, le=50)
     fixed_camera: bool = False
     small_animal_mode: bool = False
     roi: BBox = (0, 0, 1, 1)
     audio_enabled: bool = True
-    birdnet_confidence: float = Field(default=0.5, ge=0.01, le=0.99)
+    birdnet_confidence: float = Field(default=0.4, ge=0.01, le=0.99)
     # Repeated calls of one species form one visit until this much silence passes,
     # or the visit reaches the maximum length.
     sound_bout_gap_seconds: int = Field(default=120, ge=0, le=1800)
@@ -91,7 +121,7 @@ class AnalysisSettings(BaseModel):
     recording_date: date | None = None
     week: int | None = Field(default=None, ge=1, le=48)
     device: Literal["auto", "cuda", "cpu"] = "auto"
-    classifier_mode: ClassifierMode = "bioclip_2"
+    classifier_mode: ClassifierMode = "bioclip_2_5"
     log_non_wildlife: bool = False
     # Paint people gray in previews, review images and saved clips. Off shows them as
     # filmed; they are still never recorded as observations.
@@ -107,6 +137,17 @@ class AnalysisSettings(BaseModel):
         ]
     )
     max_seconds: float | None = Field(default=None, gt=0, le=86400)
+
+    def saved(self) -> dict[str, object]:
+        """What settings.json keeps: only the settings a person chooses."""
+        return self.model_dump(mode="json", exclude={*FIXED_SETTINGS, *RIG_SETTINGS})
+
+    @model_validator(mode="before")
+    @classmethod
+    def removed_ensemble(cls, data: object) -> object:
+        if isinstance(data, dict) and data.get("classifier_mode") == "ensemble":
+            return {**data, "classifier_mode": "bioclip_2_5"}
+        return data
 
     @model_validator(mode="after")
     def valid_configuration(self) -> "AnalysisSettings":
@@ -218,7 +259,7 @@ class EnvironmentReading(BaseModel):
 class EvidenceSummary(BaseModel):
     evidence_id: str
     media_kind: Literal["video", "audio"]
-    status: Literal["pending", "ready", "partial", "failed"]
+    status: Literal["pending", "ready", "partial", "failed", "removed"]
     duration_ms: int = 0
     captured_at: str
     audio_present: bool = False
@@ -271,6 +312,12 @@ class AudioEvent(ObservationContext):
     model: str = "BirdNET GLOBAL 6K V2.4"
     # Shared by repeated calls of one species heard close together: one visit.
     bout_id: str | None = None
+    # Second opinion from the cleaned sound (18 Nov 2026); None on older records.
+    cleaned_score: float | None = None
+    cleaned_agrees: bool | None = None
+    # A bird not recorded in Rajasthan (24 Nov 2026): an "Unidentified sound" whose name is
+    # BirdNET's guess, hidden until reviewed. None on older records or without the list.
+    outside_area: bool | None = None
     models: dict[str, str]
     environment: EnvironmentReading = Field(default_factory=EnvironmentReading)
     review: Review = Field(default_factory=Review)

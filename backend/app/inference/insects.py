@@ -1,11 +1,15 @@
-"""Insects and spiders at night (Vinay, 9 Nov): with this camera and infrared light
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+"""Insects and spiders at night (rule since 9 Nov 2026): with this camera and infrared light
 they are tiny, blurred and almost never recognised (263 visits in two hours, median box
 0.07 % of the picture). Between sunset and sunrise, a visit whose classified frames
 mostly name an insect or spider group (top-1 majority, or most of the top 5 in its
 median frame) is kept but hidden and silent: INSECT_NIGHT, shown in Review behind
 "Show unresolved" as "Insect (night, not identified)". By day nothing changes. Only
 insect and spider groups count: cats, rodents, geckos, bats, owls and nightjars are
-never affected. Fixed behaviour: no setting (Vinay, 9 Nov: fewer configuration knobs).
+never affected. Fixed behaviour, no setting.
 """
 
 from __future__ import annotations

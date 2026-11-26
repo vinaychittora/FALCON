@@ -1,13 +1,22 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Real periodic sensor history and event-time lookup, independent of inference."""
 
+import logging
+import time
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from app.schemas import EnvironmentReading
 from app.schemas_sensors import SensorHistoryPage, SensorReading, SensorReadingWrite
 from app.storage.database import Database
 from app.storage.sensors import SensorStore
+
+log = logging.getLogger("falcon.sensors")
+COMPACT_EVERY_SECONDS = 3600
 
 
 class SensorProvider(Protocol):
@@ -31,6 +40,7 @@ class SensorHistoryProvider:
             raise ValueError("Use a positive sensor freshness interval of at most one day")
         self.store = SensorStore(database)
         self.sensor_id, self.stale_after_seconds = sensor_id, stale_after_seconds
+        self._compacted_at = -float(COMPACT_EVERY_SECONDS)
         # Set by the sensor-node manager: the node whose readings belong to current detections.
         self.preferred: Callable[[], str | None] | None = None
 
@@ -45,7 +55,30 @@ class SensorHistoryProvider:
         return nodes[0] if len(nodes) == 1 else None
 
     def ingest(self, reading: SensorReadingWrite) -> tuple[SensorReading, bool]:
-        return self.store.ingest(reading)
+        result = self.store.ingest(reading)
+        if time.monotonic() - self._compacted_at >= COMPACT_EVERY_SECONDS:
+            self.compact()
+        return result
+
+    def compact(self) -> tuple[int, int]:
+        """Thin old rows (hourly). The first run keeps a full copy of the table."""
+        self._compacted_at = time.monotonic()
+        backup = self.store.database.path.parent / "private" / "backups" / "sensor_readings-before-thinning.sqlite3"
+        before, after = self.store.compact(backup=backup)
+        if before != after:
+            log.info("sensor history thinned: %d rows -> %d", before, after)
+        return before, after
+
+    def series(self, hours: int, sensor_id: str | None = None) -> dict[str, object]:
+        """The graph: averaged steps over the last `hours`, with sunrise and sunset."""
+        step = {24: 300, 168: 3600, 720: 3 * 3600}.get(hours, 300)
+        end = datetime.now(UTC)
+        start = end - timedelta(hours=hours)
+        return {
+            "hours": hours, "step_seconds": step, "start": start.isoformat(timespec="seconds"),
+            "end": end.isoformat(timespec="seconds"),
+            "points": self.store.series(sensor_id or self.session_sensor_id(), start, end, step),
+        }
 
     def history(
         self, *, limit: int = 100, offset: int = 0, sensor_id: str | None = None,

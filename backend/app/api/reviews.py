@@ -1,17 +1,28 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
+import json
+from datetime import datetime
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 from starlette.responses import Response
 
-from app.schemas import Event, Review
+from app.schemas import Event, Review, VisualEvent
 from app.services.configuration import load_analysis_settings
-from app.services.review_names import resolve_review_names
+from app.services.review_names import resolve_review_names, review_taxa
 from app.storage.jobs import now
 from app.storage.jsonl import match_score, normalize
 from app.storage.observation_context import enrich_events
 
 router = APIRouter(prefix="/api/detections", tags=["reviews"])
+
+# "confirmed" = confirmed or corrected; "discarded" also lists the old "not an animal".
+ReviewFilter = Literal[
+    "unreviewed", "confirmed", "correct", "corrected", "unknown", "false_positive", "discarded"
+]
 
 
 class ObservationPage(BaseModel):
@@ -25,8 +36,7 @@ def observation_archive(
     source_id: str | None = Query(None, pattern=r"^[0-9a-f]{24}$"),
     job_id: str | None = Query(None, max_length=100),
     q: str | None = Query(None, max_length=160),
-    review_status: Literal["unreviewed", "correct", "corrected", "unknown", "false_positive", "discarded"]
-    | None = None,
+    review_status: ReviewFilter | None = None,
     modality: Literal["visual", "audio"] | None = None,
     scope: Literal["live", "all"] = "all",
     captured_from: AwareDatetime | None = None,
@@ -41,7 +51,7 @@ def observation_archive(
         raise HTTPException(422, "The time window must start before it ends")
     aliases: dict[str, float] = {}
     if q and (search := normalize(q)):
-        for taxon in request.app.state.taxa.read().taxa:
+        for taxon in review_taxa(request.app.state.taxa):
             score = max(
                 match_score(search, normalize(taxon.common_name or "")),
                 match_score(search, normalize(taxon.scientific_name)),
@@ -92,7 +102,7 @@ def _prepare(body: Review, request: Request) -> Review:
         taxon = next(
             (
                 t
-                for t in request.app.state.taxa.read().taxa
+                for t in review_taxa(request.app.state.taxa)
                 if t.taxon_id == body.corrected_taxon_id
             ),
             None,
@@ -133,6 +143,15 @@ class Encounter(BaseModel):
     thumbnail_event_id: str
     event: Event
     best_confidence: float | None = None
+    # Seen and heard together: calls overlapping a visit, visits overlapping a call.
+    heard: list[dict[str, Any]] = Field(default_factory=list)
+    seen: list[str] = Field(default_factory=list)
+    # With group=stay: the stay recording the visit belongs to, and whether this row is a
+    # hidden visit of that stay attached although the filter left it out (never in total).
+    stay_id: str | None = None
+    attached: bool = False
+    stay_recordings: int | None = None
+    hidden_reason: str | None = None
 
 
 class EncounterPage(BaseModel):
@@ -142,6 +161,9 @@ class EncounterPage(BaseModel):
     hidden_unresolved: int = 0
     # Picture visits left out by hide_glimpses: seen in one analysed frame only.
     hidden_glimpses: int = 0
+    # With group=stay: pages count stays, and the matching visits in stays before this page.
+    total_stays: int | None = None
+    visits_before: int | None = None
 
 
 @router.get("/encounters", response_model=EncounterPage)
@@ -149,8 +171,7 @@ def encounters(
     request: Request,
     source_id: str | None = Query(None, pattern=r"^[0-9a-f]{24}$"),
     q: str | None = Query(None, max_length=160),
-    review_status: Literal["unreviewed", "correct", "corrected", "unknown", "false_positive", "discarded"]
-    | None = None,
+    review_status: ReviewFilter | None = None,
     modality: Literal["visual", "audio"] | None = None,
     scope: Literal["live", "all"] = "all",
     captured_from: AwareDatetime | None = None,
@@ -160,13 +181,19 @@ def encounters(
     resolved_only: bool = False,
     order: Literal["latest", "first_seen"] = "latest",
     hide_glimpses: bool = False,
+    unidentified: bool = False,
+    hidden_only: bool = False,
+    group: Literal["visit", "stay"] = "visit",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> EncounterPage:
     """Animal visits: frame records of one visual track are grouped into one row.
 
     resolved_only hides visits that have no species and no group yet (and unreviewed
-    people or vehicles); order=first_seen lists visits by when they began.
+    people or vehicles); order=first_seen lists visits by when they began; unidentified
+    lists only unreviewed pictures with no species, hidden ones included; hidden_only
+    lists only the unreviewed visits FALCON hid (Review's "Hidden" status); group=stay
+    (Review) pages by stay, so the visits of one stay recording are never split.
     """
     if captured_from and captured_to and captured_from > captured_to:
         raise HTTPException(422, "The time window must start before it ends")
@@ -175,12 +202,68 @@ def encounters(
         captured_from=captured_from, captured_to=captured_to, min_score=min_score,
         include_discarded=include_discarded, q=q, limit=limit, offset=offset,
         resolved_only=resolved_only, order=order, hide_glimpses=hide_glimpses,
-        tiers=load_analysis_settings(request.app.state.config),
+        tiers=load_analysis_settings(request.app.state.config), unidentified=unidentified,
+        hidden_only=hidden_only, group=group,
     ))
     names = resolve_review_names([item.event for item in page.encounters], request.app.state.taxa)
     for item, event in zip(page.encounters, names, strict=True):
         item.event = event
+    try:
+        cross_link(request.app.state.database, page.encounters)
+    except Exception:  # noqa: BLE001 - a missing cross-link must not hide the list
+        pass
     return page
+
+
+def _span_ms(item: Encounter) -> tuple[int, int] | None:
+    """The encounter's span on its session clock (ms)."""
+    event = item.event
+    start = event.timestamp_ms if isinstance(event, VisualEvent) else event.start_ms
+    if not item.first_captured_at or not event.captured_at:
+        return None
+    lead = (datetime.fromisoformat(event.captured_at) - datetime.fromisoformat(item.first_captured_at)).total_seconds()
+    first = round(start - lead * 1000)
+    return first, first + max(item.duration_ms, 1000)
+
+
+def cross_link(database: Any, items: list[Encounter]) -> None:
+    """One line each way: calls heard while an animal was seen, and the reverse."""
+    with database.connection() as connection:
+        for item in items:
+            span = _span_ms(item)
+            if span is None:
+                continue
+            other = "audio" if item.modality == "visual" else "visual"
+            rows = connection.execute(
+                "SELECT payload FROM observations WHERE source_id=? AND job_id=? AND modality=? "
+                "AND timestamp_ms BETWEEN ? AND ? AND review_status NOT IN ('false_positive','discarded') LIMIT 400",
+                (item.source_id, item.job_id, other, span[0] - 5000, span[1] + 5000),
+            ).fetchall()
+            if item.modality == "visual":
+                best: dict[str, float] = {}
+                for row in rows:
+                    data = json.loads(row["payload"])
+                    name = data.get("common_name") or data.get("scientific_name")
+                    confidence = float(data.get("confidence") or 0)
+                    if name and confidence >= best.get(name, -1.0):
+                        best[name] = confidence
+                item.heard = [
+                    {"name": n, "confidence": round(c, 2)}
+                    for n, c in sorted(best.items(), key=lambda kv: -kv[1])[:3]
+                ]
+            else:
+                names: list[str] = []
+                for row in rows:
+                    data = json.loads(row["payload"])
+                    c = data.get("classification") or {}
+                    label = c.get("common_name") or c.get("display_label")
+                    if (
+                        (data.get("detector") or {}).get("label") == "animal" and label
+                        and label not in names
+                        and not str(label).startswith(("Unidentified", "Unknown", "Insect (night"))
+                    ):
+                        names.append(label)
+                item.seen = names[:3]
 
 
 class EncounterReview(BaseModel):

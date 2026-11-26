@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import App, { helpRoute, pageFromHash, PAGES } from "./App";
@@ -5,9 +9,15 @@ import App, { helpRoute, pageFromHash, PAGES } from "./App";
 describe("application shell", () => {
   it("opens Live by default with every section in the main navigation", () => {
     const html = renderToStaticMarkup(<App />);
-    expect(html).toContain('href="#/live" class="active" aria-current="page"');
+    expect(html).toMatch(/href="#\/live" class="fs-row" data-page="live" aria-current="page"/);
+    // The top bar: menu, one-line page title, Listen, Help and the station status button.
+    expect(html).toContain('aria-label="Open the menu" aria-haspopup="dialog"');
+    expect(html).toContain('<h1 class="fs-title">Live</h1>');
+    expect(html).toMatch(/role="switch" aria-checked="false"[^>]*>.*Listen<\/button>/);
+    expect(html).toContain('aria-label="Help for this page"');
+    expect(html).toMatch(/aria-label="Station status: [^"]+ to review"/);
     for (const item of PAGES) expect(html).toContain(`href="#/${item.page}"`);
-    expect(html).toContain("<h1>Live <a");
+    expect(html.match(/<h1/g)).toHaveLength(1);
     expect(html).toContain('href="#/help/user-guide/live"');
     expect(html).toContain("Start observing");
     expect(html).toContain(

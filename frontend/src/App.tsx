@@ -1,27 +1,40 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "./api/client";
-import { fetchEncounters, type Encounter } from "./api/encounters";
+import { fetchEncounters, liveSourceId, type Encounter } from "./api/encounters";
+import { liveFeedFilters, splitLiveFeed } from "./api/liveFeed";
+import DetectionBell, { RingOptions } from "./ui/DetectionBell";
 import { formatElapsed } from "./api/format";
 import { indexTaxonNames } from "./api/names";
 import { listNodes } from "./api/nodes";
+import { reviewsSavedMessage } from "./api/recordView";
 import AnalysisDetails, { type SystemTab } from "./components/AnalysisDetails";
 import DisplayPreferences from "./components/DisplayPreferences";
-import LiveListen from "./ui/LiveListen";
 import Icon, { FalconMark, type IconName } from "./components/Icon";
 import Inspector from "./components/Inspector";
 import { TaxonNamesContext } from "./components/TaxonNames";
+import { ListenDetails, ListenSwitch, NavRows, ShellSheet } from "./components/Shell";
+import { defaultToReviewFilters } from "./api/reviewList";
 import { usePoll } from "./hooks/usePoll";
 import ExportPage from "./pages/ExportPage";
-import HelpPage, { HelpLink } from "./pages/HelpPage";
+import HelpPage, { HelpLink, helpHref } from "./pages/HelpPage";
 import LivePage, { liveStatus } from "./pages/LivePage";
 import MediaTestsPage from "./pages/MediaTestsPage";
+import PostingPage from "./pages/PostingPage";
 import ReviewPage from "./pages/ReviewPage";
 import SensorsPage from "./pages/SensorsPage";
 import SummaryPage from "./pages/SummaryPage";
-import Taxa, { type TaxaCache } from "./pages/Taxa";
-import type { Config, Detection, LiveState, Models } from "./types";
-import Pill from "./ui/Pill";
+import Taxa, { type TaxaCache, type Taxon } from "./pages/Taxa";
+import type { Config, LiveState, Models } from "./types";
+import { confirm } from "./api/activity";
+import { useActivity } from "./hooks/useActivity";
+import ActivityLine from "./ui/ActivityLine";
 import "./app.css";
+import { CREDIT_LINE } from "./version";
+import AboutFalcon from "./ui/AboutFalcon";
 
 export type Page =
   | "live"
@@ -32,7 +45,8 @@ export type Page =
   | "media"
   | "species"
   | "system"
-  | "help";
+  | "help"
+  | "posting";
 
 export const PAGES: {
   page: Page;
@@ -96,8 +110,30 @@ export const PAGES: {
   },
 ];
 
+/** A top-bar title that does not fit a phone's bar, and its short form: below 900 px
+ * ("narrow", the phone bar) or only below 375 px ("tiny"). */
+const SHORT_TITLES: Partial<Record<Page, [string, "narrow" | "tiny"]>> = {
+  posting: ["iNaturalist", "narrow"],
+  media: ["Media", "tiny"],
+};
+
+/** The guide section the top bar's Help button opens for each page. */
+const PAGE_HELP: Partial<Record<Page, [string, string?]>> = {
+  live: ["user-guide", "live"],
+  review: ["user-guide", "review"],
+  posting: ["user-guide", "review"],
+  summary: ["user-guide", "summary"],
+  sensors: ["sensor-node"],
+  export: ["data-export"],
+  media: ["user-guide", "media-tests"],
+  species: ["user-guide", "species"],
+  system: ["user-guide", "system"],
+};
+
 export function pageFromHash(hash: string): Page {
   const value = hash.replace(/^#\/?/, "").split(/[/?]/)[0];
+  // Posting to iNaturalist is reached from Review, not from the menu.
+  if (value === "posting") return "posting";
   return PAGES.find((item) => item.page === value)?.page ?? "live";
 }
 
@@ -109,6 +145,14 @@ export function helpRoute(hash: string): string {
 
 const ACTIVE = ["connecting", "live", "reconnecting", "stopping"];
 
+/** The header dot (25 Nov): solid green only while observing with FALCON in reach; a
+ * ring while connecting or reconnecting; a warning mark when FALCON cannot be reached. */
+export function dotClass(down: boolean, status: string | undefined): string {
+  if (down) return " down";
+  if (status === "connecting" || status === "reconnecting") return " pending";
+  return status && ACTIVE.includes(status) ? "" : " off";
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>(() =>
     typeof window === "undefined" ? "live" : pageFromHash(window.location.hash),
@@ -117,42 +161,65 @@ export default function App() {
     typeof window === "undefined" ? "" : helpRoute(window.location.hash),
   );
   const [menuOpen, setMenuOpen] = useState(false);
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
   const [systemTab, setSystemTab] = useState<SystemTab>("live");
   const [config, setConfig] = useState<Config | null>(null);
-  const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [inspect, setInspect] = useState<{
-    event: Detection;
     encounter: Encounter;
+    queue?: Encounter[];
+    /** Review's page as it holds it, attached hidden rows included: the stays' chips. */
+    pool?: Encounter[];
+    nonce: number;
   } | null>(null);
   const [revision, setRevision] = useState(0);
+  const [countsTick, setCountsTick] = useState(0);
+  const recount = useCallback(() => setCountsTick((value) => value + 1), []);
   const taxa = usePoll(() => api<TaxaCache>("/taxa"), 60000);
+  const reviewBirds = usePoll(() => api<Taxon[]>("/taxa/review-birds"), 3600000);
   const models = usePoll(() => api<Models>("/models"), 30000);
   const system = usePoll(
     () => api<{ upload_allowed?: boolean }>("/system"),
     60000,
   );
+  // The live state is also the heartbeat of the activity sign (api/activity.ts).
   const live = usePoll(() => api<LiveState>("/live/state"), 3000);
+  const heartbeat = live.refresh;
+  const activity = useActivity(heartbeat);
   const nodes = usePoll(listNodes, 10000);
   const toReview = usePoll(
     () =>
-      fetchEncounters({ scope: "live", review_status: "unreviewed", limit: 1 }),
+      fetchEncounters({ ...defaultToReviewFilters(), limit: 1 }),
     30000,
-    String(revision),
+    `${revision}-${countsTick}`,
   );
-  const taxonNames = useMemo(
-    () => indexTaxonNames(taxa.data?.taxa ?? []),
-    [taxa.data],
+  // Names a reviewer can use: the local list plus the North India sound-list birds.
+  const reviewTaxa = useMemo(
+    () => [...(taxa.data?.taxa ?? []), ...(reviewBirds.data ?? [])],
+    [taxa.data, reviewBirds.data],
   );
+  const taxonNames = useMemo(() => indexTaxonNames(reviewTaxa), [reviewTaxa]);
   const liveState = live.data;
   const liveBusy = !!liveState && ACTIVE.includes(liveState.status);
   const status = liveStatus(liveState);
   const nodeList = nodes.data?.nodes ?? [];
+  // The same visits Live lists (Likely and Confirmed, this session) feed the bar's Ring.
+  const bellSource = liveBusy ? liveSourceId(liveState?.session_id) : undefined;
+  const bellFeed = usePoll(
+    () => fetchEncounters(liveFeedFilters(bellSource, "all", false)),
+    liveBusy ? 3000 : 60000,
+    bellSource ?? "recent",
+  );
+  const bellVisits = bellFeed.data
+    ? splitLiveFeed(bellFeed.data.encounters, false).shown
+    : null;
   const online = nodeList.filter((node) => node.online).length;
 
   useEffect(() => {
     const onHash = () => {
       setPage(pageFromHash(window.location.hash));
+      if (/[?&]scenery=1/.test(window.location.hash)) setSystemTab("live");
       setRoute(helpRoute(window.location.hash));
     };
     window.addEventListener("hashchange", onHash);
@@ -179,6 +246,7 @@ export default function App() {
     window.location.hash = `#/${target}${query}`;
     setPage(target);
     setMenuOpen(false);
+    setStatusOpen(false);
   }, []);
 
   // Saving is allowed while observing: FALCON restarts the observation (a few seconds)
@@ -193,7 +261,7 @@ export default function App() {
           body: JSON.stringify(config),
         }),
       );
-      setNotice(
+      confirm(
         liveBusy
           ? "Analysis settings saved. Observation restarted with the new settings."
           : "Analysis settings saved.",
@@ -206,7 +274,8 @@ export default function App() {
   }
 
   const openEncounter = useCallback(
-    (encounter: Encounter) => setInspect({ event: encounter.event, encounter }),
+    (encounter: Encounter, queue?: Encounter[], pool?: Encounter[]) =>
+      setInspect({ encounter, queue, pool, nonce: Date.now() }),
     [],
   );
   const badges: Partial<Record<Page, string>> = {
@@ -216,14 +285,26 @@ export default function App() {
       ? taxa.data.taxa.length.toLocaleString()
       : "",
   };
-  const current = PAGES.find((item) => item.page === page) ?? PAGES[0];
+  const navRows = PAGES.map((item) => ({ ...item, badge: badges[item.page] }));
+  const help = PAGE_HELP[page];
+  const nodeText = nodeList.length
+    ? `${online} of ${nodeList.length} node${nodeList.length === 1 ? "" : "s"} online`
+    : "No sensor node";
+  const current =
+    page === "posting"
+      ? { label: "Post to iNaturalist" }
+      : (PAGES.find((item) => item.page === page) ?? PAGES[0]);
+  const short = SHORT_TITLES[page];
+  // A new "#/posting?visit=..." (from the Review popup) opens that visit's preview.
+  const postingKey =
+    typeof window === "undefined" ? "" : window.location.hash;
   return (
     <TaxonNamesContext.Provider value={taxonNames}>
       <a className="skip-link" href="#main">
         Skip to content
       </a>
-      <div className={`app-shell${menuOpen ? " menu-open" : ""}`}>
-        <aside className="sidebar" aria-label="FALCON">
+      <div className="app-shell fs-shell">
+        <nav className="fs-side" aria-label="FALCON pages">
           <button
             className="brand"
             onClick={() => navigate("live")}
@@ -235,94 +316,67 @@ export default function App() {
               <small>Field Acoustic, Lens &amp; Climate Observation Node</small>
             </span>
           </button>
-          <nav aria-label="Main">
-            {PAGES.map((item) => (
-              <a
-                key={item.page}
-                href={`#/${item.page}`}
-                className={page === item.page ? "active" : ""}
-                aria-current={page === item.page ? "page" : undefined}
-                title={item.hint}
-                onClick={() => setMenuOpen(false)}
-              >
-                <Icon name={item.icon} size={19} />
-                <span>{item.label}</span>
-                {badges[item.page] && <em>{badges[item.page]}</em>}
-              </a>
-            ))}
-          </nav>
+          <div className="fs-rows">
+            <NavRows rows={navRows} current={page} onGo={navigate} />
+          </div>
           <div className="sidebar-foot">
             <DisplayPreferences />
-            <small>FALCON 1.0 · Vinay Chittora</small>
+            <button type="button" className="fs-credit" onClick={() => setAboutOpen(true)}>
+              {CREDIT_LINE}
+            </button>
           </div>
-        </aside>
-        <button
-          className="scrim"
-          aria-label="Close menu"
-          tabIndex={-1}
-          onClick={() => setMenuOpen(false)}
-        />
+        </nav>
         <div className="main-column">
-          <div className="status-bar" aria-label="System status">
+          <header className="fs-bar">
             <button
-              className="icon-button menu-button"
-              onClick={() => setMenuOpen(!menuOpen)}
-              aria-label="Menu"
-              aria-expanded={menuOpen}
+              type="button"
+              className="rv-icon fs-menu"
+              aria-label="Open the menu"
+              aria-haspopup="dialog"
+              onClick={() => setMenuOpen(true)}
             >
-              <Icon name="menu" size={20} />
+              <Icon name="menu" size={22} />
             </button>
-            <span className="status-page">{current.label}</span>
-            {/* While listening, a small switch here keeps it controllable from any page. */}
-            <LiveListen compact />
-            <button
-              className="status-item"
-              onClick={() => navigate("live")}
-              title="Live observation"
-            >
-              <Pill tone={status.tone}>{status.label}</Pill>
-              {liveBusy && (
+            <h1 className={`fs-title${short ? ` fs-title-${short[1]}` : ""}`}>
+              {short ? (
                 <>
-                  <span className="status-source">{liveState?.name}</span>
-                  <code>{formatElapsed(liveState?.session_timestamp_ms)}</code>
+                  <span className="fs-t-long">{current.label}</span>
+                  <span className="fs-t-short">{short[0]}</span>
                 </>
+              ) : (
+                current.label
               )}
-            </button>
-            <button
-              className="status-item"
-              onClick={() => navigate("sensors")}
-              title="Sensor nodes"
+            </h1>
+            <ActivityLine activity={activity} />
+            <ListenSwitch />
+            <DetectionBell
+              bar
+              encounters={bellVisits}
+              resetKey={bellSource ?? "recent"}
+            />
+            <a
+              className="rv-icon"
+              href={help ? helpHref(help[0], help[1]) : "#/help"}
+              aria-label="Help for this page"
             >
-              <Icon name="node" size={16} />
-              <span>
-                {nodeList.length
-                  ? `${online} of ${nodeList.length} node${nodeList.length === 1 ? "" : "s"} online`
-                  : "No sensor node"}
-              </span>
+              <Icon name="question" size={22} />
+            </a>
+            <button
+              type="button"
+              className={`rv-icon fs-stat${dotClass(activity.down, liveState?.status)}`}
+              aria-haspopup="dialog"
+              aria-label={
+                activity.down
+                  ? `Station status: FALCON cannot be reached, ${nodeText}`
+                  : `Station status: ${status.label.toLowerCase()}, ${nodeText}, ${(toReview.data?.total ?? 0).toLocaleString()} to review`
+              }
+              onClick={() => setStatusOpen(true)}
+            >
+              <Icon name="activity" size={22} />
+              <i aria-hidden="true" />
             </button>
-            {!!toReview.data?.total && (
-              <button
-                className="status-item"
-                onClick={() => navigate("review")}
-              >
-                <Icon name="check" size={16} />{" "}
-                <span>{toReview.data.total.toLocaleString()} to review</span>
-              </button>
-            )}
-          </div>
+          </header>
           <main id="main" tabIndex={-1}>
-            {notice && (
-              <p className="banner banner-good toast" role="status">
-                {notice}
-                <button
-                  className="icon-button"
-                  onClick={() => setNotice("")}
-                  aria-label="Dismiss"
-                >
-                  <Icon name="close" size={14} />
-                </button>
-              </p>
-            )}
             {error && (
               <p className="banner banner-bad toast" role="alert">
                 {error}
@@ -337,16 +391,18 @@ export default function App() {
             )}
             {page === "live" && (
               <LivePage
-                taxa={taxa.data?.taxa ?? []}
+                taxa={reviewTaxa}
                 onOpen={openEncounter}
                 onNavigate={navigate}
+                onCounts={recount}
               />
             )}
             {page === "review" && (
               <ReviewPage
-                taxa={taxa.data?.taxa ?? []}
+                taxa={reviewTaxa}
                 onOpen={openEncounter}
                 revision={revision}
+                onCounts={recount}
               />
             )}
             {page === "summary" && <SummaryPage onNavigate={navigate} />}
@@ -375,14 +431,12 @@ export default function App() {
                 <Taxa />
               </div>
             )}
-            {page === "help" && <HelpPage route={route} />}
+            {page === "help" && <HelpPage route={route} onAbout={() => setAboutOpen(true)} />}
+            {page === "posting" && <PostingPage key={postingKey} />}
             {page === "system" && (
               <div className="page system-page">
                 <header className="page-header">
                   <div>
-                    <h1>
-                      System <HelpLink slug="user-guide" section="system" />
-                    </h1>
                     <p>
                       Health of this inference computer, analysis settings,
                       models and remote access.
@@ -403,19 +457,106 @@ export default function App() {
           </main>
         </div>
       </div>
+      {menuOpen && (
+        <ShellSheet
+          title="FALCON"
+          onClose={() => setMenuOpen(false)}
+          initialFocus='[aria-current="page"]'
+        >
+          <nav className="fs-nv rv-gut" aria-label="FALCON pages">
+            <NavRows rows={navRows} current={page} onGo={navigate} />
+            <div className="sidebar-foot">
+              <DisplayPreferences />
+              <button
+                type="button"
+                className="fs-credit"
+                onClick={() => {
+                  setMenuOpen(false);
+                  setAboutOpen(true);
+                }}
+              >
+                {CREDIT_LINE}
+              </button>
+            </div>
+          </nav>
+        </ShellSheet>
+      )}
+      {aboutOpen && <AboutFalcon onClose={() => setAboutOpen(false)} />}
+      {statusOpen && (
+        <ShellSheet title="Station status" onClose={() => setStatusOpen(false)}>
+          {activity.down && (
+            <p className="banner banner-bad fs-down rv-gut" role="alert">
+              {activity.state.text} The values below are the last ones received.
+            </p>
+          )}
+          <div className="fs-facts rv-gut">
+            <dl className="fs-kv">
+              <div>
+                <dt>Station</dt>
+                <dd>{status.label}</dd>
+              </div>
+              {liveBusy && (
+                <>
+                  <div>
+                    <dt>Source</dt>
+                    <dd>{liveState?.name}</dd>
+                  </div>
+                  <div>
+                    <dt>Session time</dt>
+                    <dd className="fs-mono">
+                      {formatElapsed(liveState?.session_timestamp_ms)}
+                    </dd>
+                  </div>
+                </>
+              )}
+              <div>
+                <dt>Sensor nodes</dt>
+                <dd>{nodeText}</dd>
+              </div>
+              <div>
+                <dt>To review</dt>
+                <dd>{(toReview.data?.total ?? 0).toLocaleString()}</dd>
+              </div>
+            </dl>
+            <div className="fs-actions">
+              <button type="button" className="rv-next" onClick={() => navigate("live")}>
+                Go to Live
+              </button>
+              <button type="button" className="tlink" onClick={() => navigate("sensors")}>
+                Sensor nodes
+              </button>
+              <button type="button" className="tlink" onClick={() => navigate("review")}>
+                Review
+              </button>
+            </div>
+            <ListenDetails />
+            <section className="fs-listen" aria-labelledby="fs-ring-h">
+              <h3 id="fs-ring-h">Ring</h3>
+              <div className="fs-listen-options">
+                <RingOptions />
+              </div>
+            </section>
+          </div>
+        </ShellSheet>
+      )}
       {inspect && (
         <Inspector
-          key={inspect.event.event_id}
-          event={inspect.event}
+          key={`${inspect.encounter.encounter_id}-${inspect.nonce}`}
           encounter={inspect.encounter}
-          taxa={taxa.data?.taxa ?? []}
-          onClose={() => setInspect(null)}
-          onSaved={(updated) => {
-            setInspect((value) =>
-              value ? { ...value, event: updated } : value,
-            );
-            setRevision((value) => value + 1);
-            setNotice("Review saved.");
+          queue={inspect.queue}
+          pool={inspect.pool}
+          startIndex={
+            inspect.queue?.findIndex(
+              (item) => item.encounter_id === inspect.encounter.encounter_id,
+            ) ?? 0
+          }
+          taxa={reviewTaxa}
+          onClose={(saved) => {
+            setInspect(null);
+            if (saved) {
+              setRevision((value) => value + 1);
+              confirm(reviewsSavedMessage(saved));
+            }
           }}
         />
       )}

@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import {
@@ -17,7 +21,6 @@ import {
 } from "../api/format";
 import Icon from "../components/Icon";
 import { hashQuery } from "../api/summary";
-import { HelpLink } from "./HelpPage";
 import { usePoll } from "../hooks/usePoll";
 import type { Config } from "../types";
 import Pill from "../ui/Pill";
@@ -170,9 +173,6 @@ export default function ExportPage() {
     <div className="page export-page">
       <header className="page-header">
         <div>
-          <h1>
-            Export <HelpLink slug="data-export" />
-          </h1>
           <p>
             A clean dataset for researchers: choose a time window and which
             identifications to include. The download is a Camera Trap Data

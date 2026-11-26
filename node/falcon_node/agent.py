@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """The running sensor node: detection, stream supervision, sampling and control."""
 
 import logging
@@ -17,6 +21,47 @@ from falcon_node.sensors import RainPlate, Sampler, Spool, detect_climate
 log = logging.getLogger("falcon-node")
 
 
+def retry_delay(failures: int) -> float:
+    """Seconds before restarting a stopped camera stream: 2 s for the first three tries
+    in a row (a camera that blinks out at dawn is back almost at once), then doubling to
+    a minute for a camera that is really gone."""
+    return 2.0 if failures <= 3 else min(60.0, 2.0 ** min(failures - 2, 6))
+
+
+def microphone_retry_delay(failures: int) -> float:
+    """Gentler for the microphone: the audio HAT can go silent after quick reopenings
+    (and then needs a reboot), so 5, 10, 20, 40, 60 s."""
+    return min(60.0, 5.0 * 2.0 ** max(0, failures - 1))
+
+
+MIC_MIN_GAP = 5.0  # never two microphone reopenings within this many seconds
+
+
+class Channel:
+    """One supervised capture process: the camera, or the microphone (14 Nov 2026:
+    separate, so a camera dropout at dawn never reopens the microphone and the reverse)."""
+
+    def __init__(self, name: str, delay: Any, min_gap: float = 0.0):
+        self.name, self.delay, self.min_gap = name, delay, min_gap
+        self.pipeline: media.Pipeline | None = None
+        self.restart_requested = False
+        self.failures = 0
+        self.restarts = 0
+        self.retry_at = 0.0
+        self.started_at = -1e9
+        self.since: str | None = None
+        self.last_error: str | None = None
+
+    def alive(self) -> bool:
+        return self.pipeline is not None and self.pipeline.alive()
+
+    def stop(self) -> None:
+        if self.pipeline is not None:
+            self.pipeline.stop()
+            self.pipeline = None
+            self.since = None
+
+
 class StreamSupervisor(threading.Thread):
     """Keeps MediaMTX and the capture pipeline running as the saved state asks."""
 
@@ -26,13 +71,9 @@ class StreamSupervisor(threading.Thread):
         self.stop_event = threading.Event()
         self.wake = threading.Event()
         self.lock = threading.Lock()
-        self.pipeline: media.Pipeline | None = None
-        self.restart_requested = False
-        self.failures = 0
-        self.restarts = 0
-        self.retry_at = 0.0
-        self.since: str | None = None
-        self.last_error: str | None = None
+        self.camera_channel = Channel("camera", retry_delay)
+        self.microphone_channel = Channel("microphone", microphone_retry_delay, MIC_MIN_GAP)
+        self.channels = (self.camera_channel, self.microphone_channel)
         # Night picture (USB webcams): greyscale while the IR lights make it magenta.
         self.night_dark = False
         self.colour_cast: float | None = None
@@ -64,7 +105,7 @@ class StreamSupervisor(threading.Thread):
         camera, _ = self.sources()
         if camera is None or camera.kind != "v4l2" or self.agent.state.camera.night_mode != "auto":
             return
-        if self.pipeline is None or not self.pipeline.alive():
+        if not self.camera_channel.alive():
             return
         try:
             cast = media.colour_cast(Path(self.probe_path()).read_bytes())
@@ -78,7 +119,7 @@ class StreamSupervisor(threading.Thread):
         if self._night_streak >= 3:
             self.night_dark, self._night_streak = dark, 0
             log.info("Night picture: %s (colour cast %.0f)", "greyscale" if dark else "colour", cast)
-            self.restart()
+            self.restart("camera")
 
     def sources(self) -> tuple[media.Camera | None, media.Microphone | None]:
         agent = self.agent
@@ -93,98 +134,156 @@ class StreamSupervisor(threading.Thread):
         camera, microphone = self.sources()
         return self.agent.state.stream_enabled and (camera is not None or microphone is not None)
 
-    def restart(self) -> None:
+    # Kept for callers that predate the split (thermal guard, tests): the camera's.
+    @property
+    def pipeline(self) -> media.Pipeline | None:
+        return self.camera_channel.pipeline
+
+    @pipeline.setter
+    def pipeline(self, value: media.Pipeline | None) -> None:
+        self.camera_channel.pipeline = value
+
+    @property
+    def restarts(self) -> int:
+        return sum(channel.restarts for channel in self.channels)
+
+    @property
+    def last_error(self) -> str | None:
+        return self.camera_channel.last_error or self.microphone_channel.last_error
+
+    def restart(self, which: str = "all") -> None:
+        """Restart "camera", "microphone" or "all" capture processes."""
         with self.lock:
-            self.restart_requested = True
-            self.failures, self.retry_at = 0, 0.0
+            for channel in self.channels:
+                if which in {"all", channel.name}:
+                    channel.restart_requested = True
+                    channel.failures, channel.retry_at = 0, 0.0
         self.wake.set()
 
-    def _start(self) -> None:
+    def separate_microphone(self) -> bool:
+        """The microphone has its own process and path (unless only an IP camera's own
+        sound is relayed, which stays with its picture)."""
+        _, microphone = self.sources()
+        return microphone is not None
+
+    def _start(self, channel: Channel) -> None:
         agent = self.agent
         camera, microphone = self.sources()
-        if microphone is not None:
+        base = f"rtsp://127.0.0.1:{agent.config.rtsp_port}/"
+        if channel is self.microphone_channel:
+            if microphone is None:
+                return
             media.apply_mixer(microphone, agent.state.microphone, Path(agent.config.mixer_state))
-        media.apply_camera_controls(camera, agent.config.camera_controls)
-        if camera is not None and camera.kind == "v4l2" and agent.state.picture:
-            try:
-                media.set_picture_controls(camera, agent.state.picture)
-            except ValueError as exc:
-                log.warning("Saved picture controls not applied: %s", exc)
-        mono, probe = self.night_picture(camera)
-        commands = media.build_pipeline(
-            camera, agent.state.camera, microphone, agent.state.microphone,
-            f"rtsp://127.0.0.1:{agent.config.rtsp_port}/{media.STREAM_PATH}", agent.config.ffmpeg,
-            mono=mono, probe_path=probe,
-        )
-        self.pipeline = media.Pipeline(commands)
-        self.since = datetime.now(UTC).isoformat()
-        log.info("Stream started (%s)", ", ".join(
-            part for part in (camera and camera.description, microphone and microphone.description) if part
-        ))
+            commands = media.build_microphone_pipeline(
+                microphone, agent.state.microphone, base + media.AUDIO_PATH, agent.config.ffmpeg,
+            )
+            description = microphone.description
+        else:
+            if camera is None:
+                return
+            media.apply_camera_controls(camera, agent.config.camera_controls)
+            if camera.kind == "v4l2" and agent.state.picture:
+                try:
+                    media.set_picture_controls(camera, agent.state.picture)
+                except ValueError as exc:
+                    log.warning("Saved picture controls not applied: %s", exc)
+            mono, probe = self.night_picture(camera)
+            commands = media.build_pipeline(
+                camera, agent.state.camera, None, agent.state.microphone,
+                base + media.STREAM_PATH, agent.config.ffmpeg, mono=mono, probe_path=probe,
+            )
+            description = camera.description
+        channel.pipeline = media.Pipeline(commands)
+        channel.started_at = time.monotonic()
+        channel.since = datetime.now(UTC).isoformat()
+        log.info("Stream started: %s (%s)", channel.name, description)
 
     def _stop_pipeline(self) -> None:
-        if self.pipeline is not None:
-            self.pipeline.stop()
-            self.pipeline = None
-            self.since = None
+        for channel in self.channels:
+            channel.stop()
+
+    def _wanted(self, channel: Channel) -> bool:
+        camera, microphone = self.sources()
+        return self.desired() and (camera if channel is self.camera_channel else microphone) is not None
 
     def step(self) -> None:
         agent = self.agent
         try:
             agent.media_server.ensure_running()
         except OSError as exc:
-            self.last_error = f"Stream server could not start ({type(exc).__name__}). Is MediaMTX installed?"
+            self.camera_channel.last_error = (
+                f"Stream server could not start ({type(exc).__name__}). Is MediaMTX installed?"
+            )
             return
+        for channel in self.channels:
+            self._step(channel)
+
+    def _step(self, channel: Channel) -> None:
         with self.lock:
-            restart, self.restart_requested = self.restart_requested, False
-        if restart or not self.desired():
-            self._stop_pipeline()
-        if not self.desired():
-            self.failures = 0
+            restart, channel.restart_requested = channel.restart_requested, False
+        wanted = self._wanted(channel)
+        if restart or not wanted:
+            channel.stop()
+        if not wanted:
+            channel.failures = 0
             return
-        if self.pipeline is not None and self.pipeline.alive():
-            if time.monotonic() - self.pipeline.started > 60:
-                self.failures = 0
+        if channel.alive():
+            if channel.pipeline is not None and time.monotonic() - channel.pipeline.started > 60:
+                channel.failures = 0
             return
-        if self.pipeline is not None:
-            errors = list(self.pipeline.errors)
-            self.last_error = errors[-1] if errors else "The capture process stopped."
-            log.warning("Stream stopped: %s", self.last_error)
-            self._stop_pipeline()
-            self.failures += 1
-            self.restarts += 1
-            self.retry_at = time.monotonic() + min(60.0, 2.0 ** min(self.failures, 6))
-        if time.monotonic() < self.retry_at:
+        now = time.monotonic()
+        if channel.pipeline is not None:
+            errors = list(channel.pipeline.errors)
+            channel.last_error = errors[-1] if errors else "The capture process stopped."
+            # Why it stopped: which process, its exit code and its last messages (the
+            # camera drops out at dawn and dusk while its day/night filter switches).
+            for line in channel.pipeline.exit_report():
+                log.warning("Stream stopped (%s): %s", channel.name, line)
+            channel.stop()
+            channel.failures += 1
+            channel.restarts += 1
+            channel.retry_at = now + channel.delay(channel.failures)
+        if now < channel.retry_at or now - channel.started_at < channel.min_gap:
             return
         try:
-            self._start()
+            self._start(channel)
         except OSError as exc:
-            self.last_error = f"Capture could not start ({type(exc).__name__}). Check that ffmpeg is installed."
-            self.failures += 1
-            self.retry_at = time.monotonic() + min(60.0, 2.0 ** min(self.failures, 6))
+            channel.last_error = f"Capture could not start ({type(exc).__name__}). Check that ffmpeg is installed."
+            channel.failures += 1
+            channel.retry_at = time.monotonic() + channel.delay(channel.failures)
 
     def status(self) -> dict[str, Any]:
         camera, microphone = self.sources()
         path = self.agent.media_server.path_status()
-        alive = self.pipeline is not None and self.pipeline.alive()
+        audio_path = self.agent.media_server.path_status(media.AUDIO_PATH) if microphone is not None else None
+        channels = [c for c in self.channels if self._wanted(c)]
+        alive = bool(channels) and all(c.alive() for c in channels)
+        ready = (camera is None or path is None or path["ready"]) and (
+            microphone is None or audio_path is None or audio_path["ready"]
+        )
         if not self.agent.state.stream_enabled:
             state = "off"
         elif self.agent.thermal.level >= thermal.STREAM_STOPPED:
             state = "too hot"
         elif camera is None and microphone is None:
             state = "no sources"
-        elif alive and (path is None or path["ready"]):
+        elif alive and ready:
             state = "streaming"
         elif alive:
             state = "starting"
         else:
-            state = "retrying" if self.failures else "starting"
+            state = "retrying" if any(c.failures for c in channels) else "starting"
+        since = max((c.since for c in channels if c.since), default=None)
+        tracks = (path["tracks"] if path and camera is not None else []) + (audio_path["tracks"] if audio_path else [])
         return {
-            "state": state, "since": self.since if alive else None, "restarts": self.restarts,
+            "state": state, "since": since if alive else None, "restarts": self.restarts,
             "error": self.last_error if state in {"retrying", "starting", "no sources"} and self.last_error else None,
             "rtsp_port": self.agent.config.rtsp_port, "rtsp_path": media.STREAM_PATH,
+            # The microphone on its own path (FALCON reads sound from here when present).
+            "audio_path": media.AUDIO_PATH if microphone is not None else None,
+            "channels": {c.name: {"alive": c.alive(), "restarts": c.restarts} for c in self.channels},
             "video": camera is not None, "audio": microphone is not None or bool(camera and camera.kind == "rtsp"),
-            "tracks": path["tracks"] if path else [], "readers": path["readers"] if path else 0,
+            "tracks": tracks, "readers": (path["readers"] if path else 0) + (audio_path["readers"] if audio_path else 0),
             "night": {
                 "mode": self.agent.state.camera.night_mode,
                 "greyscale": self.night_picture(camera)[0],
@@ -372,11 +471,13 @@ class Agent:
         }
 
     def set_stream(self, action: str) -> None:
-        if action not in {"start", "stop", "restart"}:
-            raise ValueError("action must be start, stop or restart")
-        if action == "restart":
+        if action not in {"start", "stop", "restart", "restart_microphone", "restart_camera"}:
+            raise ValueError("action must be start, stop, restart, restart_microphone or restart_camera")
+        if action.startswith("restart"):
             self.state.stream_enabled = True
-            self.stream.restart()
+            # FALCON's sound self-heal restarts only the microphone.
+            self.stream.restart({"restart": "all", "restart_microphone": "microphone",
+                                 "restart_camera": "camera"}[action])
         else:
             self.state.stream_enabled = action == "start"
         self.state.save()
@@ -390,7 +491,7 @@ class Agent:
         self.state.components[name] = enabled
         self.state.save()
         if name in {"camera", "microphone"}:
-            self.stream.restart()
+            self.stream.restart(name)
 
     def update_camera(self, changes: dict[str, Any]) -> None:
         if self.camera is None:
@@ -403,7 +504,7 @@ class Agent:
             raise ValueError("This camera does not offer that resolution")
         self.state.camera = self.state.camera.updated(changes, self.camera.kind)
         self.state.save()
-        self.stream.restart()
+        self.stream.restart("camera")
 
     def camera_picture(self) -> dict[str, Any]:
         """The webcam's adjustable picture controls with their current values."""
@@ -436,7 +537,7 @@ class Agent:
         if set(changes) == {"audio_gain_percent"} and self.microphone is not None and gain is not None:
             if media.apply_gain(self.microphone, gain):
                 return
-        self.stream.restart()
+        self.stream.restart("microphone")
 
     def pull(self, ack: list[str], limit: int) -> dict[str, Any]:
         if not isinstance(ack, list) or not all(isinstance(item, str) and len(item) <= 200 for item in ack):

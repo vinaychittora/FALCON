@@ -1,9 +1,15 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import secrets
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import SecretStr, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from app.media.sun import sun_times
 from app.schemas import EnvironmentReading
 from app.schemas_sensors import (
     IDENTIFIER,
@@ -12,6 +18,7 @@ from app.schemas_sensors import (
     SensorReadingWrite,
     SensorTimestamp,
 )
+from app.services.configuration import load_analysis_settings
 from app.services.sensors import SensorHistoryProvider
 from app.storage.sensors import SensorReplayConflict
 
@@ -40,6 +47,29 @@ def history(
         )
     except ValueError:
         raise HTTPException(422, "Enter a valid sensor history time interval") from None
+
+
+@router.get("/series")
+def series(request: Request, hours: int = 24) -> dict:
+    """Averaged weather for the graph (24 h, 7 days or 30 days)."""
+    if hours not in {24, 168, 720}:
+        raise HTTPException(422, "Choose 24, 168 or 720 hours")
+    provider = request.app.state.sensors
+    if not isinstance(provider, SensorHistoryProvider):
+        return {"hours": hours, "points": [], "sun": []}
+    result = provider.series(hours)
+    config = load_analysis_settings(request.app.state.config)
+    sun: list[dict[str, str]] = []
+    if config.site_lat is not None and config.site_lon is not None:
+        day = datetime.fromisoformat(str(result["start"])).date()
+        while day <= datetime.now(UTC).date():
+            times = sun_times(day, config.site_lat, config.site_lon)
+            if times:
+                sun.append({"sunrise": times[0].isoformat(timespec="minutes"),
+                            "sunset": times[1].isoformat(timespec="minutes")})
+            day += timedelta(days=1)
+    result["sun"] = sun
+    return result
 
 
 @router.post("/readings", response_model=SensorIngestResult, status_code=201)

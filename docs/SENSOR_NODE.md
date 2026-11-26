@@ -141,11 +141,13 @@ The node's settings are in `/etc/falcon-node/node.conf` (see
   one keyframe per second for tight evidence clips). A USB webcam is read through V4L2
   instead: the node either encodes H.264 itself or sends the webcam's own MJPEG frames
   untouched for the inference computer to decode (about 10 Mbit/s, so a wired network is
-  recommended). `ffmpeg` adds the HAT's 48 kHz sound
-  as AAC and publishes one RTSP stream to a local [MediaMTX](https://github.com/bluenviron/mediamtx)
-  server. Only localhost may publish; the inference computer reads with the user `falcon`
-  and a password derived from the pairing key. If capture stops, the node restarts it
-  with a growing pause (2 s up to 1 min).
+  recommended). The picture is published as one RTSP stream to a local
+  [MediaMTX](https://github.com/bluenviron/mediamtx) server. The microphone has its own
+  `ffmpeg` process and its own stream path (`falcon-audio`, the HAT's 48 kHz sound as
+  AAC), so a camera dropout never interrupts the sound; an IP camera's own sound stays
+  with its picture. Only localhost may publish; the inference computer reads with the user
+  `falcon` and a password derived from the pairing key. If a capture process stops, the
+  node restarts it with a growing pause (2 s up to 1 min).
 - **Weather.** The BME280 is read directly over I²C in forced mode (it sleeps between
   readings, so it does not warm itself). The rain plate is read with the internal
   pull-up and pull-down in turn: if the two disagree, the wire is not connected and

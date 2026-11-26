@@ -33,7 +33,9 @@ Open **http://127.0.0.1:8000**. For another region:
 records is kept; there is no cap. India gives about 14,400 species, which BioCLIP prepares
 once in about two minutes on an RTX 3060 Ti and then reuses. To keep a list smaller, run
 `python scripts/build_taxa.py` with `--limits '{"Insecta": 0, "Lepidoptera": 500}'`
-(0 leaves a group out, a number keeps the most-observed species).
+(0 leaves a group out, a number keeps the most-observed species). `make taxa` then also
+builds `data/taxa/groups.json`, the groups used for group-level names such as
+"Cat (species uncertain)".
 Add `--include-domestic` so cattle, goats, camels, dogs and cats are labelled as domestic
 animals instead of the nearest wild species.
 

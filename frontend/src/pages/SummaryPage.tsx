@@ -1,3 +1,7 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { useMemo, useState } from "react";
 import {
   fetchSessions,
@@ -15,7 +19,6 @@ import {
   toLocalInput,
 } from "../api/format";
 import Icon from "../components/Icon";
-import { HelpLink } from "./HelpPage";
 import { usePoll } from "../hooks/usePoll";
 import Pill from "../ui/Pill";
 
@@ -325,14 +328,24 @@ export default function SummaryPage({
   const [to, setTo] = useState(() => toLocalInput(new Date()));
   const [review, setReview] = useState<ReviewPolicy>("candidates");
   const [source, setSource] = useState("");
-  const bounds = periodBounds(period, from, to);
-  const key = JSON.stringify({ period, bounds, review, source });
+  // The key holds the choices only. The bounds are worked out at each request, so a
+  // rolling period still moves with the clock, but a re-render never starts a new request.
+  const key = JSON.stringify({ period, from, to, review, source });
   const summary = usePoll(
-    () => fetchSummary({ ...bounds, review, source_id: source || undefined }),
+    () =>
+      fetchSummary({
+        ...periodBounds(period, from, to),
+        review,
+        source_id: source || undefined,
+      }),
     30000,
     key,
   );
-  const sessions = usePoll(() => fetchSessions(bounds), 30000, key);
+  const sessions = usePoll(
+    () => fetchSessions(periodBounds(period, from, to)),
+    30000,
+    key,
+  );
   const sessionRows = useMemo(
     () => sessions.data?.sessions ?? null,
     [sessions.data],
@@ -346,9 +359,6 @@ export default function SummaryPage({
     <div className="page summary-page">
       <header className="page-header">
         <div>
-          <h1>
-            Summary <HelpLink slug="user-guide" section="summary" />
-          </h1>
           <p>
             How many visits and species were recorded, in a period or per
             observation session. Export any session or the whole archive.

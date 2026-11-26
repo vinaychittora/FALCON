@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 from collections.abc import Iterator
 from pathlib import Path
 from threading import Event
@@ -45,7 +49,7 @@ def test_unknown_rules_keep_alternatives() -> None:
         == "unknown"
     )
     ambiguous = classify_label(
-        np.array([0.3, 0.29, 0.28, 0.2, 0.1], dtype=np.float32), candidates, config
+        np.array([0.4, 0.39, 0.38, 0.2, 0.1], dtype=np.float32), candidates, config
     )
     assert ambiguous.unknown_reason == "Ambiguous top candidates" and len(ambiguous.top_k) == 5
     candidate = classify_label(

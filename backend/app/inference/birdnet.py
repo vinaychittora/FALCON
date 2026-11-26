@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import csv
 import io
 import json
@@ -16,6 +20,8 @@ import psutil
 
 from app.config import ROOT, Settings
 from app.inference.pipeline import Cancelled
+from app.inference.sound_list import outside_area, rajasthan_names
+from app.inference.two_pass import Scores, apply_agreement, cleaned_only
 from app.media.audio import extract_audio, run_cancellable
 from app.schemas import AnalysisSettings, AudioEvent, Video
 from app.taxonomy.inaturalist import TaxaCache
@@ -45,11 +51,24 @@ HUMAN_CONFIDENCE = 0.25
 # Candidates down to this score are read back for diagnosis only ("what did it hear?");
 # observations still need the configured BirdNET confidence.
 CANDIDATE_FLOOR = 0.1
+NORTH_INDIA_LIST = Path(__file__).with_name("birdnet_north_india.txt")
 
 
-def top_candidates(path: Path, taxa: TaxaCache, limit: int = 5) -> list[dict[str, object]]:
+def local_birds(taxa: TaxaCache) -> set[str]:
+    return {t.scientific_name.casefold() for t in taxa.taxa if t.group == "Aves"}
+
+
+def north_india_labels() -> set[str]:
+    """BirdNET labels of every bird expected in North India in any week (see the script
+    scripts/birdnet_north_india.py), so passing migrants can be named by sound."""
+    return {line.strip() for line in NORTH_INDIA_LIST.read_text(encoding="utf-8").splitlines() if line.strip()}
+
+
+def top_candidates(
+    path: Path, taxa: TaxaCache, limit: int = 5, allowed: set[str] | None = None,
+) -> list[dict[str, object]]:
     """The strongest bird candidates in a result file, best score per species."""
-    allowed = {t.scientific_name.casefold() for t in taxa.taxa if t.group == "Aves"}
+    allowed = local_birds(taxa) if allowed is None else allowed
     best: dict[str, dict[str, object]] = {}
     for row in csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))):
         name = row["Scientific name"]
@@ -91,10 +110,11 @@ def human_segments(path: Path, video: Video, config: AnalysisSettings) -> list[t
 
 
 def parse_results(
-    path: Path, video: Video, job_id: str, taxa: TaxaCache, config: AnalysisSettings
+    path: Path, video: Video, job_id: str, taxa: TaxaCache, config: AnalysisSettings,
+    allowed: set[str] | None = None,
 ) -> list[AudioEvent]:
     rows = list(csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))))
-    allowed = {t.scientific_name.casefold() for t in taxa.taxa if t.group == "Aves"}
+    allowed = local_birds(taxa) if allowed is None else allowed
     offset = round((video.audio_start_s - video.start_time_s) * 1000)
     limit = (
         min(video.duration_ms, round(config.max_seconds * 1000))
@@ -102,6 +122,7 @@ def parse_results(
         else video.duration_ms
     )
     result = []
+    area = rajasthan_names()
     for row in rows:
         if row["Scientific name"].casefold() not in allowed:
             continue
@@ -122,6 +143,7 @@ def parse_results(
                 scientific_name=row["Scientific name"],
                 common_name=row["Common name"],
                 confidence=confidence,
+                outside_area=outside_area(row["Scientific name"], area),
                 models={
                     "birdnet_analyzer": "2.4.0",
                     "birdnet_model": "GLOBAL_6K_V2.4",
@@ -131,6 +153,18 @@ def parse_results(
             )
         )
     return result
+
+
+def window_scores(path: Path, video: Video, allowed: set[str]) -> Scores:
+    """Every allowed bird's score per 3-second window of a result file."""
+    offset = round((video.audio_start_s - video.start_time_s) * 1000)
+    scores: Scores = {}
+    for row in csv.DictReader(io.StringIO(path.read_text(encoding="utf-8-sig"))):
+        name = row["Scientific name"].casefold()
+        if name in allowed:
+            start = max(0, round(float(row["Start (s)"]) * 1000) + offset)
+            scores[(start, name)] = (float(row["Confidence"]), row["Common name"])
+    return scores
 
 
 def analysis_input(
@@ -272,8 +306,12 @@ class BirdNET:
         cancel: Event,
         message: Callable[[str], None],
         voice_segments: list[tuple[int, int]] | None = None,
+        cleaned: Path | None = None,
+        shadow: list[dict[str, object]] | None = None,
     ) -> tuple[list[AudioEvent], dict[str, float | int | str]]:
-        """Bird detections and metrics; voice_segments, when given, receives human-voice intervals."""
+        """Bird detections and metrics; voice_segments, when given, receives human-voice
+        intervals. With `cleaned` (the same sound through the Clean filter) each detection
+        gets the cleaned pass's verdict, and `shadow` receives calls only that pass heard."""
         if not self.executable.exists():
             raise RuntimeError("BirdNET environment is missing; run make setup")
         started = time.perf_counter()
@@ -310,17 +348,19 @@ class BirdNET:
                     config.site_lat, config.site_lon, birdnet_week(config), temporary, log, cancel,
                 )
                 matched = [label for label in matched if label in local] or matched
-                message(
-                    "Using configured local location/date filtering; retaining local birds only"
-                )
+                message("Using the local birds for this place and week")
             else:
                 message("No site coordinates configured; using the matched local bird list")
+            # Every bird of North India, any week: migrants must not be missed (18 Nov
+            # 2026). The local list above always stays inside it.
+            regional = north_india_labels()
+            present = set(matched)
+            matched += [label for label in labels if label in regional and label not in present]
+            allowed = {label.split("_", 1)[0].casefold() for label in matched}
             species_list = temporary / "species_list.txt"
             human = [label for label in HUMAN_LABELS if label in labels]
             species_list.write_text("\n".join([*matched, *human]) + "\n")
-            message(
-                f"BirdNET matched {len(matched)} of {len(names)} local birds by scientific name"
-            )
+            message(f"BirdNET listens for {len(matched)} birds (local list and North India)")
             wav = analysis_input(source, temporary / "audio.wav", cancel, config.max_seconds)
             # Voices are looked for at a lower bar than birds; bird rows are
             # filtered again at the configured confidence when parsed.
@@ -359,10 +399,43 @@ class BirdNET:
                 raise RuntimeError(
                     "BirdNET did not create its expected CSV output: " + log.read_text()[-2000:]
                 )
-            detections = parse_results(files[0], video, job_id, taxa, config)
-            candidates = top_candidates(files[0], taxa)
+            detections = parse_results(files[0], video, job_id, taxa, config, allowed)
+            candidates = top_candidates(files[0], taxa, allowed=allowed)
             if voice_segments is not None:
                 voice_segments.extend(human_segments(files[0], video, config))
+            second_pass: dict[str, float | int | str] = {}
+            if cleaned is not None:
+                # A failed second opinion never costs a record: it stays without a verdict.
+                tick = time.perf_counter()
+                folder_cleaned = temporary / "cleaned"
+                folder_cleaned.mkdir()
+                try:
+                    done = self._run_worker(
+                        {
+                            "wav": str(cleaned), "output": str(folder_cleaned), "min_conf": min_conf,
+                            "slist": str(species_list), "threads": 2,
+                        },
+                        cancel, timeout,
+                    )
+                    if done is None:
+                        run_cancellable(
+                            [*command[:1], str(cleaned), "-o", str(folder_cleaned), *command[4:]],
+                            log, cancel, self.env, timeout=timeout,
+                        )
+                    second = list(folder_cleaned.glob("*.BirdNET.results.csv"))
+                    if len(second) != 1:
+                        raise RuntimeError("no result file")
+                    scores = window_scores(second[0], video, allowed)
+                    apply_agreement(detections, scores)
+                    if shadow is not None:
+                        shadow.extend(cleaned_only(
+                            window_scores(files[0], video, allowed), scores, config.birdnet_confidence,
+                        ))
+                    second_pass["audio_clean_pass_seconds"] = round(time.perf_counter() - tick, 3)
+                except Cancelled:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - see above
+                    second_pass["audio_clean_pass_error"] = type(exc).__name__
             # Never move a caller's original WAV; only a temporary conversion is retained.
             if self.settings.debug_audio and wav != source:
                 debug = self.settings.data_dir / "temp" / f"debug-audio-{job_id}.wav"
@@ -375,4 +448,5 @@ class BirdNET:
                 "audio_peak_ram_mb": round(peak, 1),
                 "matched_birdnet_species": len(matched),
                 "audio_top_candidates": json.dumps(candidates),
+                **second_pass,
             }

@@ -1,122 +1,97 @@
+// Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+// This program is free software: you can redistribute it and/or modify it under the terms of the
+// GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+// the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { VisualEvent } from "../types";
-import Inspector, { reviewSpeciesOptions } from "./Inspector";
+import type { Encounter } from "../api/encounters";
+import type { AudioEvent, VisualEvent } from "../types";
+import Inspector from "./Inspector";
 
-const taxon = {
+const robin = {
   taxon_id: 42,
-  common_name: "Common Tailorbird",
-  scientific_name: "Orthotomus sutorius",
+  common_name: "Oriental Magpie-Robin",
+  scientific_name: "Copsychus saularis",
   group: "Aves",
   observation_count: 100,
 };
-function renderReview(corrected = false) {
-  const event = {
+const flowerpecker = {
+  ...robin,
+  taxon_id: 7,
+  common_name: "Thick-billed Flowerpecker",
+  scientific_name: "Dicaeum agile",
+};
+
+function visit(review = {}, classification = {}) {
+  return {
     event_id: "observation",
-    source_filename: "sample.mp4",
+    source_id: "source",
+    source_filename: "falcon-node",
     modality: "visual",
     timestamp_ms: 0,
-    review: {
-      status: "corrected",
-      notes: null,
-      corrected_taxon_id: corrected ? taxon.taxon_id : null,
-      corrected_scientific_name: corrected ? taxon.scientific_name : null,
-    },
+    duration_ms: 1000,
+    track_id: "run-track-1",
+    bbox_norm: [0.1, 0.1, 0.4, 0.4],
+    detector: { score: 0.8, model: "detector" },
+    environment: { status: "not_connected" },
+    models: {},
+    evidence_summaries: [],
+    review: { status: "unreviewed", notes: null, corrected_taxon_id: null, corrected_scientific_name: null, ...review },
     classification: {
-      status: "unknown",
-      display_label: "Unknown bird",
-      score: 0.31,
-      top_k: [taxon],
+      broad_group: "Aves",
+      status: "candidate",
+      certainty: "likely",
+      display_label: "Thick-billed Flowerpecker — candidate",
+      common_name: flowerpecker.common_name,
+      scientific_name: flowerpecker.scientific_name,
+      score: 0.41,
+      margin: 0.02,
+      unknown_reason: null,
+      top_k: [{ ...flowerpecker, score: 0.41 }, { ...robin, score: 0.39 }],
+      ...classification,
     },
   } as unknown as VisualEvent;
-  return renderToStaticMarkup(
-    <Inspector
-      event={event}
-      taxa={[taxon]}
-      onClose={() => {}}
-      onSaved={() => {}}
-    />,
-  );
 }
 
-describe("species review selection", () => {
-  const frog = {
-    ...taxon,
-    taxon_id: 1,
-    common_name: "Indian Bullfrog",
-    scientific_name: "Hoplobatrachus tigerinus",
-  };
-  const warbler = {
-    ...taxon,
-    taxon_id: 2,
-    common_name: "Sulphur-bellied Warbler",
-    scientific_name: "Phylloscopus griseolus",
-  };
-  const source = {
-    modality: "visual",
-    classification: {
-      top_k: [warbler],
-      model_evidence: [{ top_k: [taxon, warbler] }],
-    },
-  } as unknown as VisualEvent;
+const render = (event: VisualEvent | AudioEvent, encounter?: Partial<Encounter>) =>
+  renderToStaticMarkup(
+    <Inspector
+      event={event}
+      encounter={encounter ? ({ encounter_id: "e", records: 3, event, ...encounter } as Encounter) : undefined}
+      taxa={[robin, flowerpecker]}
+      onClose={() => {}}
+    />,
+  );
 
-  it("starts with actual model alternatives and the saved selection rather than taxonomy cache order", () => {
-    const choices = reviewSpeciesOptions(
-      source,
-      [frog, taxon, warbler],
-      taxon.taxon_id,
-      "",
-    );
-    expect(choices.context).toBe("model");
-    expect(choices.options.map((choice) => choice.taxon_id)).toEqual([42, 2]);
-    expect(
-      reviewSpeciesOptions(source, [frog, taxon, warbler], 0, "").options.map(
-        (choice) => choice.taxon_id,
-      ),
-    ).toEqual([2, 42]);
+describe("record view", () => {
+  it("shows the decisions and the model evidence in front, with no Save button", () => {
+    const html = render(visit(), { heard: [{ name: "House Sparrow", confidence: 0.851 }] });
+    for (const word of ["Confirm", "Correct", "Unsure", "Discard", "Model&#x27;s guess", "Camera model", "Microphone model", "House Sparrow", "0.85", "similarity, not a probability"])
+      expect(html).toContain(word);
+    expect(html).not.toContain("Save review");
+    expect(html).not.toContain("%<");
+    expect(html).toContain('class="rv-decision primary"');
   });
 
-  it("asks for a search if no local model alternatives exist", () => {
-    expect(reviewSpeciesOptions(source, [frog], 0, "")).toEqual({
-      options: [],
-      context: "empty",
-    });
-    expect(reviewSpeciesOptions(source, [frog], frog.taxon_id, "")).toEqual({
-      options: [frog],
-      context: "selected",
-    });
+  it("disables Confirm and leaves no primary decision without a candidate species", () => {
+    const html = render(visit({}, { status: "unknown", certainty: "unknown", scientific_name: null, common_name: null, display_label: "Unknown bird", top_k: [] }));
+    expect(html).not.toContain("rv-decision primary");
+    expect(html.match(/<button[^>]*data-kind="confirm"[^>]*>/)?.[0]).toContain('disabled=""');
   });
 
-  it("searches the complete taxonomy with typos when the user types", () => {
-    const result = reviewSpeciesOptions(
-      source,
-      [frog, taxon, warbler],
-      0,
-      "bullforg",
-    );
-    expect(result.context).toBe("search");
-    expect(result.options).toEqual([frog]);
+  it("puts the corrected species first and keeps what the model said", () => {
+    const html = render(visit({ status: "corrected", corrected_taxon_id: robin.taxon_id, corrected_scientific_name: robin.scientific_name, corrected_common_name: robin.common_name }), {});
+    expect(html).toContain("Final identification");
+    expect(html).toMatch(/<h1[^>]*>Oriental Magpie-Robin<\/h1>/);
+    expect(html).toContain("Corrected to Oriental Magpie-Robin");
+    expect(html).toContain("Model said");
+    expect(html).toContain("your choice");
+    expect(html.match(/<button[^>]*data-kind="correct"[^>]*>/)?.[0]).toContain('aria-pressed="true"');
   });
 
-  it("does not choose the closest species automatically or enable saving an empty correction", () => {
-    const html = renderReview();
-    expect(html).toContain("No species selected");
-    expect(html).toMatch(
-      /<button class="primary" disabled="">Save review<\/button>/,
-    );
-    expect(html).toMatch(/role="option" aria-selected="false"/);
-    expect(html.match(/<button[^>]*decision-correct[^>]*>/)?.[0]).toContain(
-      'disabled=""',
-    );
-  });
-
-  it("keeps an explicitly saved correction selected independently of model output", () => {
-    const html = renderReview(true);
-    expect(html).toMatch(/role="option" aria-selected="true"/);
-    expect(html).toContain("Selected species");
-    expect(html).toContain("Common Tailorbird");
-    expect(html).toContain("Unknown bird");
-    expect(html).not.toContain('<button class="primary" disabled="">');
-    expect(html).toContain("model said");
+  it("keeps every other fact in labelled expands", () => {
+    const html = render(visit(), {});
+    for (const label of ["Camera model in detail", "Sound during this visit", "Recording", "Record data", "Post to iNaturalist", "Available after Confirm or Correct", "A decision applies to all 3 frames"])
+      expect(html).toContain(label);
   });
 });

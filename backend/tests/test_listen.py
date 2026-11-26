@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Listening live: decoded sound passes from memory to the web UI and is never stored."""
 
 import threading
@@ -41,8 +45,12 @@ def test_noise_reduction_lowers_steady_hiss_and_keeps_a_bird_like_tone() -> None
     after_hiss = np.sqrt(np.mean(cleaned[48000:96000] ** 2))
     assert after_hiss < before_hiss / 3  # the hiss is at least ~10 dB lower
     call = cleaned[int(48000 * 3.2):int(48000 * 3.9)]
-    assert np.sqrt(np.mean(call**2)) > 0.1  # the 3 kHz call comes through
-    assert abs(len(cleaned) - t.size) <= 1024
+    # The call stands well clear of the remaining hiss (the same soft gate as the clip
+    # Clean: a pure tone is lowered a little by the 750 Hz smoothing, never removed).
+    assert np.sqrt(np.mean(call**2)) > 6 * after_hiss
+    # The stream is delayed by about 70 ms, never more than 150 ms.
+    assert cleaner.latency_ms < 150
+    assert abs(len(cleaned) - t.size) <= 48000 * 0.15
 
 
 def rtsp_limit() -> int:

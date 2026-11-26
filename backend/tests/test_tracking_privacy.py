@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Track continuity for moving birds, group inference for unknowns, and people masking."""
 
 import numpy as np
@@ -161,7 +165,8 @@ def test_pipeline_reports_people_and_masks_them_out_of_thumbnails(mask_people: b
     )
     # The person is never an observation, whether or not it is masked.
     assert len(events) == 1 and events[0].detector.label == "animal"
-    assert people == ([[(0.45, 0.1, 0.9, 0.9)]] if mask_people else [[]])
+    # People are always reported (masking is decided by the live service).
+    assert people == [[(0.45, 0.1, 0.9, 0.9)]]
     crop = crops[0]
     assert crop[:, 0].tolist()[0] == [180, 180, 180]
     assert crop[crop.shape[0] // 2, -1].tolist() == ([96, 96, 96] if mask_people else [180, 180, 180])
@@ -205,26 +210,3 @@ def test_certainty_tiers_name_what_is_known() -> None:
     assert either_label(["Indian Pitta", "Mangrove Pitta"]) == "Indian or Mangrove Pitta"
     assert either_label(["Red-vented Bulbul", "Jungle Myna"]) == "Red-vented Bulbul or Jungle Myna"
     assert either_label(["Only one"]) == "Only one" and either_label([]) == ""
-
-
-def test_ensemble_disagreement_names_the_shared_genus() -> None:
-    from app.inference.labels import classify_models
-
-    config = AnalysisSettings(classifier_mode="ensemble", species_threshold=0.33, ambiguity_margin=0.025)
-    pittas = [
-        Taxon(taxon_id=1, scientific_name="Pitta brachyura", common_name="Indian Pitta", group="Aves", iconic_group="Aves", observation_count=1),
-        Taxon(taxon_id=2, scientific_name="Pitta megarhyncha", common_name="Mangrove Pitta", group="Aves", iconic_group="Aves", observation_count=1),
-        Taxon(taxon_id=3, scientific_name="Pelargopsis capensis", common_name="Stork-billed Kingfisher", group="Aves", iconic_group="Aves", observation_count=1),
-    ]
-    scores = {
-        "bioclip_2_5": np.array([0.60, 0.50, 0.30], dtype=np.float32),  # Indian Pitta
-        "bioclip_2": np.array([0.50, 0.60, 0.30], dtype=np.float32),  # Mangrove Pitta
-    }
-    result = classify_models(scores, pittas, config)
-    assert result.consensus == "disagree" and result.certainty == "probable"
-    assert result.genus == "Pitta" and result.display_label == "Indian Pitta"
-    assert [c.common_name for c in result.contenders] == ["Indian Pitta", "Mangrove Pitta"]
-    weak = classify_models({"bioclip_2_5": np.array([0.60, 0.50, 0.30], dtype=np.float32),
-                            "bioclip_2": np.array([0.20, 0.18, 0.10], dtype=np.float32)}, pittas, config)
-    assert weak.consensus == "insufficient_evidence" and weak.certainty == "possible"
-    assert weak.display_label == "Indian Pitta?"

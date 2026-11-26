@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 """Species counts per period, one row per session, and the resolved-only live feed."""
 
 from datetime import UTC, datetime, timedelta
@@ -114,18 +118,19 @@ def test_summary_counts_visits_per_species_and_sessions_list_each_run(tmp_path: 
             "scope": "live", "resolved_only": "true", "order": "first_seen", "source_id": SOURCE,
         }).json()
         assert feed["hidden_unresolved"] == 2
+        # t2 was rejected ("not an animal"): since 16 Nov that is Discarded, hidden like it.
         assert [item["encounter_id"] for item in feed["encounters"]] == [
-            call.event_id, f"{SESSION}:t6", f"{SESSION}:t3", f"{SESSION}:t2", f"{SESSION}:t1",
+            call.event_id, f"{SESSION}:t6", f"{SESSION}:t3", f"{SESSION}:t1",
         ]
         latest = client.get("/api/detections/encounters", params={"scope": "live", "source_id": SOURCE}).json()
-        assert latest["hidden_unresolved"] == 0 and latest["total"] == 7
+        assert latest["hidden_unresolved"] == 0 and latest["total"] == 6
         # Review hides one-frame picture visits ("glimpses") when asked; sound stays.
         single = {i["encounter_id"] for i in latest["encounters"] if i["modality"] == "visual" and i["records"] == 1}
         trimmed = client.get("/api/detections/encounters", params={
             "scope": "live", "source_id": SOURCE, "hide_glimpses": "true",
         }).json()
         assert single and trimmed["hidden_glimpses"] == len(single)
-        assert trimmed["total"] == 7 - len(single)
+        assert trimmed["total"] == 6 - len(single)
         assert not single & {i["encounter_id"] for i in trimmed["encounters"]}
         records = client.get("/api/detections", params={"scope": "live", "resolved_only": "true"}).json()
-        assert records["total"] == 9
+        assert records["total"] == 8  # t2's record is discarded ("not an animal")

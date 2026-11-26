@@ -1,9 +1,13 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import gc
 from importlib.metadata import PackageNotFoundError, version
 from typing import Any
 
 from app.config import Settings
-from app.inference.bioclip import BioCLIP, BioCLIPEnsemble
+from app.inference.bioclip import BioCLIP
 from app.inference.classifier_models import classifier_specs
 from app.inference.megadetector import VERSION, MegaDetector
 from app.schemas import AnalysisSettings, ClassifierMode
@@ -31,8 +35,8 @@ class ModelRegistry:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.detector: MegaDetector | None = None
-        self.classifier: BioCLIP | BioCLIPEnsemble | None = None
-        self.classifier_mode: ClassifierMode = "bioclip_2"
+        self.classifier: BioCLIP | None = None
+        self.classifier_mode: ClassifierMode = "bioclip_2_5"
         self.device = "unloaded"
         self.size = 0
         self.load_memory: dict[str, float] = {}
@@ -56,7 +60,7 @@ class ModelRegistry:
 
     def load(
         self, config: AnalysisSettings, taxa: TaxaCache, message: Any
-    ) -> tuple[MegaDetector, BioCLIP | BioCLIPEnsemble]:
+    ) -> tuple[MegaDetector, BioCLIP]:
         device = device_for(config.device)
         if device == "cpu":
             import os
@@ -73,19 +77,15 @@ class ModelRegistry:
             self.device, self.size = device, config.detector_size
             self.classifier_mode = config.classifier_mode
         self.last_error = None
-        models: list[BioCLIP] = []
         try:
             if self.detector is None:
                 message(f"Loading {VERSION} on {device}")
                 self.detector = MegaDetector(device, config.detector_size)
                 self.memory("after_detector_mb")
             if self.classifier is None:
-                for spec in classifier_specs(config.classifier_mode):
-                    message(f"Loading {spec.name} on {device}")
-                    models.append(
-                        BioCLIP(device, self.settings.data_dir / "cache" / "embeddings", spec)
-                    )
-                self.classifier = BioCLIPEnsemble(models) if len(models) > 1 else models[0]
+                spec = classifier_specs(config.classifier_mode)[0]
+                message(f"Loading {spec.name} on {device}")
+                self.classifier = BioCLIP(device, self.settings.data_dir / "cache" / "embeddings", spec)
                 self.memory("after_classifier_mb")
             message(f"Preparing text embeddings for {len(taxa.taxa)} local taxa ({taxa.place_name})")
             self.classifier.prepare_taxa(taxa, config.prompt_templates)
@@ -93,7 +93,6 @@ class ModelRegistry:
             return self.detector, self.classifier
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
-            models.clear()
             self.release()
             raise
 

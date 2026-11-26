@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Vinay Chittora. See LICENSE and ADDITIONAL-TERMS.md.
+# This program is free software: you can redistribute it and/or modify it under the terms of the
+# GNU Affero General Public License as published by the Free Software Foundation, version 3 of
+# the License, with the additional terms in ADDITIONAL-TERMS.md that section 7 of the License permits.
 import hashlib
 import threading
 import time
@@ -236,9 +240,11 @@ def test_source_timestamp_reset_recovers_without_network_reconnect(tmp_path: Pat
     recorder = EvidenceRecorder(tmp_path / "evidence", results, reserve_bytes=0)
     original_pin, original_generation = feed(recorder, source, trigger=4, stop_at=4.5)
     new_pin = ""
+    faults: list[str] = []
     with av.open(str(source)) as container:
         for packet in container.demux(video=0):
             recorder.append_packet(packet)
+            faults.append(str(recorder.metrics()["evidence_recording_fault"]))
             for decoded in packet.decode():
                 timestamp = float(decoded.pts * decoded.time_base)
                 if timestamp >= 4 and not new_pin:
@@ -248,11 +254,16 @@ def test_source_timestamp_reset_recovers_without_network_reconnect(tmp_path: Pat
                         recording_generation=recorder.current_generation,
                         recording_timestamp_s=timestamp,
                     )) or ""
+    # The notice shows once, right after the reset, and clears once a full clip
+    # fits in the new timeline: it never stays up while clips can be saved.
+    assert faults[0] and not faults[-1]
+    assert recorder.metrics()["evidence_timestamp_resets"] == 1
     recorder.request(original_pin, "before-reset")
     recorder.request(new_pin, "after-reset")
     recorder.close()
     assert results.values["before-reset"]["status"] == "partial"
     assert results.values["after-reset"]["status"] == "ready"
+    assert not recorder.metrics()["evidence_recording_fault"]
 
 
 def test_receive_clock_bounds_clip_to_nonnegative_session_time(tmp_path: Path) -> None:
